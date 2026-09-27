@@ -254,4 +254,43 @@ public class WorkspaceViewTests : IDisposable
 
         Assert.Equal(["icon/big.png", "textures/map.png"], Workspace.Pictures(directory));
     }
+
+    /// What a mesh wears is recorded per submesh, in the renderer's order.
+    ///
+    /// A submesh is what decides which material draws a triangle: 140 of the game's 3,245 item
+    /// meshes wear more than one picture, and #145's one mesh is the gun in submesh 0 and its
+    /// flashlight in submesh 1. Flattened to the set of names that happened to be written out —
+    /// which is what this did — it was enough to say which pictures a model wears and not enough
+    /// to put them on it, and the editor drew the flashlight in the gun's paint.
+    [Fact]
+    public void WhatAMeshWearsIsRecordedSubmeshBySubmesh()
+    {
+        var directory = Path.Combine(_root, "0145_mp5_gold_gift");
+        Directory.CreateDirectory(Path.Combine(directory, "textures"));
+        Directory.CreateDirectory(Path.Combine(directory, "meshes"));
+
+        // With path ids, which is what pairs a written file with the texture a renderer named.
+        ExportedAsset Written(string relative, AssetsTools.NET.Extra.AssetClassID cls, string name, long id)
+        {
+            var full = Path.Combine(directory, relative);
+            File.WriteAllText(full, name);
+            return new ExportedAsset(full, cls, name, Path.GetExtension(relative).TrimStart('.'),
+                name.Length, new AssetAddress("bhlw", cls.ToString(), name, PathId: id));
+        }
+
+        var gold = Written("textures/mp5Gold_map.png", AssetsTools.NET.Extra.AssetClassID.Texture2D, "mp5Gold_map", 11);
+        var light = Written("textures/mp5Light_map.png", AssetsTools.NET.Extra.AssetClassID.Texture2D, "mp5Light_map", 22);
+        var mesh = Written("meshes/mp5_gold_mesh.glb", AssetsTools.NET.Extra.AssetClassID.Mesh, "mp5_gold_mesh", 33);
+
+        // The middle one is a picture the game paints this model with and the export did not write
+        // out — the base weapon's, in a workspace made from one of its skins. It keeps its place.
+        var elsewhere = new AssetAddress("bhlw", "Texture2D", "not_written_here", PathId: 44);
+
+        Workspace.Create(directory, "w", "w", "tester", "26.11.0",
+            [gold, light, mesh with { Wears = [gold.Address, elsewhere, light.Address] }]);
+
+        var wears = WorkspaceView.Open(directory)!.Files.Single(f => f.Name == "mp5_gold_mesh.glb").Wears;
+
+        Assert.Equal(["textures/mp5Gold_map.png", "", "textures/mp5Light_map.png"], wears);
+    }
 }

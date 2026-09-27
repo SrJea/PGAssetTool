@@ -21,13 +21,19 @@ public sealed record PackOperation
     /// drops it. Stripped from the manifest that goes into the pack.
     public string? BaselineSha256 { get; init; }
 
-    /// For a mesh, the other files in this workspace that are the textures it is drawn with.
+    /// For a mesh, the other files in this workspace that are the textures it is drawn with — one
+    /// entry per submesh, in the renderer's own order, and empty where the picture that submesh
+    /// wears was not written here.
     ///
     /// A workspace is a model and a folder of pictures and holds nothing else that says which goes
     /// on which — the renderers and materials that decide it are in the game, and a workspace made
     /// from a skin does not even agree with them: the geometry is the weapon's and the paint is the
     /// skin's. So the answer is written down at the one moment anything knows it, which is the
     /// extraction. The editor reads it to show the model dressed.
+    ///
+    /// Positional, because a submesh is what decides which material draws a triangle and a weapon
+    /// carrying two of them is ordinary. Flattened to the set of names that happened to be here, it
+    /// was enough to say which pictures a model wears and not enough to put them on it.
     public List<string> Wears { get; init; } = [];
 
     /// Whether the alpha channel of the file this comes from says which part of the image is used

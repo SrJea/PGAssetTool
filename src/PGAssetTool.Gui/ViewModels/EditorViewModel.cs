@@ -663,7 +663,7 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
     /// always live in the same one — and the workspace was extracted from the prefab, so whichever
     /// bundle holds the renderer is named by something in it.
     /// </param>
-    private IReadOnlyList<long> Wears(BundleSet bundles, WorkspaceFile file, IReadOnlyList<string> named)
+    private IReadOnlyList<AssetNode?> Wears(BundleSet bundles, WorkspaceFile file, IReadOnlyList<string> named)
     {
         if (file.Target.Class != nameof(AssetClassID.Mesh) || file.Target.PathId is not { } mesh) return [];
 
@@ -674,11 +674,10 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
             if (!ReferenceEquals(_dressed.Reader, bundles))
                 _dressed = (bundles, new Dressing(bundles));
 
-            return _dressed.Dressing!.For(file.Target.Container, mesh, named)
-                .Where(t => t is not null)
-                .Select(t => t!.PathId)
-                .Distinct()
-                .ToList();
+            // In submesh order, holes and all. It used to be flattened to a set of path ids here,
+            // which was enough to mark the list and not enough to dress the model: #145's one mesh
+            // has the gun in submesh 0 and the flashlight in submesh 1, wearing two pictures.
+            return _dressed.Dressing!.For(file.Target.Container, mesh, named);
         }
         catch (Exception)
         {
@@ -689,8 +688,8 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
 
     private (BundleSet? Reader, Dressing? Dressing) _dressed;
 
-    /// What the model now being shown is drawn with, for the list of pictures to be marked against.
-    private IReadOnlyList<long> _wearing = [];
+    /// What the model now being shown is drawn with, in submesh order, as the game's renderer says.
+    private IReadOnlyList<AssetNode?> _wearing = [];
 
     private static object? FromGame(BundleSet bundles, WorkspaceFile file)
     {
@@ -734,8 +733,12 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
                 // extraction of one weapon was one model as far as the remembered views were
                 // concerned: switching between them carried the angle across, and switching to a
                 // workspace of anything else threw it away.
-                preview.Show(mesh, caption, null, $"{side}:{file.FullPath}");
-                Offer(preview, preview.ChosenTexture?.Name);
+                // Dressed submesh by submesh out of the author's own files, which is what the game
+                // does with the pictures these were extracted from. See Dressing.
+                var worn = SelectedWorkspace is { } workspace ? Dressed(file, workspace.Directory) : null;
+
+                preview.Show(mesh, caption, worn, $"{side}:{file.FullPath}");
+                Offer(preview, preview.ChosenTexture?.Name, dressed: worn is not null);
                 break;
 
             case PreviewSound sound: preview.Show(sound, caption); break;
@@ -743,35 +746,80 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
         }
     }
 
+    /// Which of the workspace's pictures goes on each submesh of the model being shown.
+    ///
+    /// A submesh is what decides which material draws a triangle, and a weapon that carries two is
+    /// ordinary — #145's one mesh is the gun in submesh 0 and its flashlight in submesh 1, painted
+    /// `mp5Gold_map` and `mp5Light_map`. One picture over the whole model gets the smaller part
+    /// wrong, visibly: 1,869 of its 21,912 drawn pixels.
+    ///
+    /// Two accounts of it, and the manifest's comes first. The extraction wrote down which of
+    /// *these* files each submesh wears, which is the only account that is right for a workspace
+    /// made from a skin — the geometry is the weapon's, the renderer in the game names the weapon's
+    /// paint, and every picture here is the skin's. Failing that, the renderer in the game, mapped
+    /// back to the files by the asset each was written from.
+    ///
+    /// A submesh whose picture is not in this workspace stays null and draws grey, which is the
+    /// honest answer: the file is not here to show.
+    private IReadOnlyList<string?> Dressing(WorkspaceFile file)
+    {
+        if (file.Wears is { Count: > 0 } recorded && recorded.Any(w => w.Length > 0))
+            return recorded.Select(w => w.Length == 0 ? null : w).ToList();
+
+        return _wearing
+            .Select(worn => worn is null
+                ? null
+                : Files.FirstOrDefault(f =>
+                    f.Target.PathId == worn.PathId
+                    && string.Equals(f.Target.Container, worn.Bundle, StringComparison.OrdinalIgnoreCase))
+                    ?.RelativePath)
+            .ToList();
+    }
+
+    /// Those pictures, read off disk, in submesh order. Null when the model wears nothing this
+    /// workspace holds, which leaves the old behaviour — grey until somebody picks one.
+    private IReadOnlyList<PreviewImage?>? Dressed(WorkspaceFile file, string directory)
+    {
+        var worn = Dressing(file);
+        if (worn.All(w => w is null)) return null;
+
+        return worn.Select(w =>
+        {
+            if (w is null) return null;
+            try { return AssetPreview.FromFile(Path.Combine(directory, w)) as PreviewImage; }
+            catch (Exception) { return null; }
+        }).ToList();
+    }
+
     /// Offers the workspace's own images to put on a mesh.
     ///
-    /// Which texture belongs on which part is decided by the renderer in the game's prefab, which
-    /// the editor never resolves — so a mesh here draws grey unless somebody says what to put on
-    /// it. Offering the author's own files is both the useful answer and the honest one: what they
-    /// want to see is their mesh wearing their texture, which is what the mod is.
+    /// The model arrives wearing what it wears in the game, out of the author's own files — see
+    /// Dressing. This list is for the other question: what this geometry looks like in some other
+    /// picture, which is one picture over the whole model and is what a skin is.
     /// <param name="wearing">
     /// The one to put back on, when the same model is being read again. Emptying the list empties
     /// the box bound to it, which writes a null back through the selection, so a choice that is to
     /// survive has to be made again — and the file behind it may well be what changed, which is why
     /// it is read from disk rather than assumed to be still on the model.
     /// </param>
-    private void Offer(PreviewViewModel preview, string? wearing = null)
+    /// <param name="dressed">
+    /// Whether the model already went on wearing its own paint, in which case the list is for
+    /// trying something else rather than for choosing what it should have been wearing.
+    /// </param>
+    private void Offer(PreviewViewModel preview, string? wearing = null, bool dressed = false)
     {
         preview.TextureChoices.Clear();
         if (SelectedWorkspace is not { } workspace) return;
 
-        // Which of the workspace's pictures this model is drawn with. The extraction wrote that
-        // down, which is the only account that is right for a workspace made from a skin: the
-        // geometry is the weapon's, the renderer in the game names the weapon's paint, and every
-        // picture here is the skin's. Asking the game would answer about a file that is not here.
-        var worn = SelectedFile?.Wears is { Count: > 0 } named
-            ? named.ToHashSet(StringComparer.OrdinalIgnoreCase)
-            : Files
-                .Where(f => f.Target.PathId is { } id && _wearing.Contains(id))
-                .Select(f => f.RelativePath)
-                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        // Which of the workspace's pictures this model is drawn with, from the same answer that
+        // dresses it.
+        var worn = (SelectedFile is { } showing ? Dressing(showing) : [])
+            .Where(w => w is not null)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase)!;
 
-        preview.TextureChoices.Add(new TextureChoice("(none)", "", 0));
+        // Named as the browse pane names it, and meaning the same thing: the model wearing what
+        // the game paints it with, submesh by submesh.
+        preview.TextureChoices.Add(new TextureChoice("(automatic)", "", 0));
 
         // Lit first and listed first, the same way the browse pane does it: a workspace holds a
         // dozen pictures and two of them are the ones this mesh wears.
@@ -782,9 +830,22 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
                 Worn = worn.Contains(picture),
             });
 
-        // Put on by itself, unless something was already chosen. A model drawn grey says nothing
+        // Already wearing its own paint, so the list opens on the answer it is wearing. Choosing
+        // one of the others is then a deliberate act with a way back, which is what the browse
+        // pane does and what the dash of a half-chosen answer never was.
+        if (dressed)
+        {
+            // Unless somebody had put something else on this model, which is theirs to keep.
+            var again = preview.TextureChoices.FirstOrDefault(c => c.Name == wearing && c.PathId != 0);
+            preview.ChosenTexture = again ?? preview.TextureChoices[0];
+            if (again is not null) WearFromDisk(preview, again);
+            return;
+        }
+
+        // Nothing here to dress it with — a mesh whose renderer was not found, or whose paint was
+        // never written into this workspace. Put one on by itself: a model drawn grey says nothing
         // about the mod, and choosing the right picture out of the list was a step everybody took
-        // every time — the tool knows the answer, so it takes the step.
+        // every time.
         // What was on before wins only while this model wears it too. Otherwise the model's own
         // paint goes on — moving from one mesh to another is exactly when carrying the last choice
         // across stops being helpful — and a deliberate choice this model knows nothing about is
