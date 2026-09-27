@@ -537,6 +537,11 @@ A three-state checkbox turned protection off on its first click, and only Save m
 And because any write to a workspace makes the editor read it again, a re-read keeps text typed and
 not yet saved rather than refilling the form from disk, which it used to do without a word.
 
+**The window's busy flag and the manager's are two flags, and the status bar shows both.** The bar in
+the status line is the only thing on screen that says the tool is doing something, and the manager
+does its work under a flag of its own — so turning a mod on or off left the bar still for the whole
+rewrite. `MainViewModel.Working` is what the bar binds.
+
 ---
 
 ## Verifying a change

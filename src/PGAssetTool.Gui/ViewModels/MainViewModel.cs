@@ -50,11 +50,24 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             if (e.PropertyName is nameof(ManagerViewModel.ConfirmChanges) or nameof(ManagerViewModel.TileSize)
                 or nameof(ManagerViewModel.Order))
                 Remember();
+
+            if (e.PropertyName is nameof(ManagerViewModel.Busy)) OnPropertyChanged(nameof(Working));
         };
     }
 
     [ObservableProperty] private string _status = "Looking for the game…";
     [ObservableProperty] private bool _busy = true;
+
+    partial void OnBusyChanged(bool value) => OnPropertyChanged(nameof(Working));
+
+    /// Whether anything is going on that the window should say is going on.
+    ///
+    /// The manager's work is the other half of it and was missing: turning a mod on restores and
+    /// rewrites bundles for a second or two, on its own tab, and the bar in the status line — the
+    /// one thing on screen that says the tool is doing something — stayed still throughout, because
+    /// the manager keeps a busy flag of its own and this is what the window binds.
+    public bool Working => Busy || Manager.Busy;
+
     [ObservableProperty] private string _search = "";
     [ObservableProperty] private WeaponListItem? _selected;
     [ObservableProperty] private WeaponDetailViewModel? _detail;

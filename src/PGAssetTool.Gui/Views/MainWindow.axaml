@@ -254,7 +254,7 @@
     <Border DockPanel.Dock="Bottom" Height="26" Background="#18181b" Padding="10,0">
       <Grid ColumnDefinitions="Auto,*">
         <ProgressBar Grid.Column="0" Width="80" Height="3" Margin="0,0,10,0"
-                     IsIndeterminate="True" IsVisible="{Binding Busy}" VerticalAlignment="Center" />
+                     IsIndeterminate="True" IsVisible="{Binding Working}" VerticalAlignment="Center" />
         <TextBlock Grid.Column="1" Text="{Binding Status}" Classes="dim" VerticalAlignment="Center" />
       </Grid>
     </Border>

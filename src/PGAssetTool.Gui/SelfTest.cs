@@ -1258,11 +1258,26 @@ internal static class SelfTest
             if (multi < 1) return Fail("no list in the manager accepts more than one row");
             Console.WriteLine($"manager  asked: {model.Manager.Asking.Title}");
 
+            // The bar in the status line is the only thing on screen that says the tool is doing
+            // something, and the window binds the shell's answer rather than the manager's — so
+            // turning a mod on or off left it still for the whole of the rewrite. Watched rather
+            // than sampled: the work is over in a second or two, and a look afterwards always finds
+            // it finished.
+            var moved = false;
+            void Moving(object? _, System.ComponentModel.PropertyChangedEventArgs e)
+            {
+                if (e.PropertyName == nameof(MainViewModel.Working) && model.Working && model.Manager.Busy)
+                    moved = true;
+            }
+            model.PropertyChanged += Moving;
+
             var turning = System.Diagnostics.Stopwatch.StartNew();
             model.Manager.ProceedCommand.Execute(null);
-            // The manager reports its own busy state; the shell is not involved in this one.
             WaitWhile(() => model.Manager.Busy || model.Manager.Asking is not null, 180_000);
+            model.PropertyChanged -= Moving;
             Console.WriteLine($"manager  {model.Manager.Status}");
+            Console.WriteLine($"manager  the window said it was working while the manager was: {moved}");
+            if (!moved) return Fail("the manager rewrote the game and the window showed nothing happening");
             Console.WriteLine($"timing   turning one mod off took {turning.ElapsedMilliseconds}ms");
 
             var mineNow = model.Manager.Mods.First(m => m.Mod.Id == PackIdentity);
