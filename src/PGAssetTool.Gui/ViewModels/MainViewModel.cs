@@ -60,6 +60,31 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
     partial void OnBusyChanged(bool value) => OnPropertyChanged(nameof(Working));
 
+    /// How large the windows draw themselves, as a percentage. See ToolSettings.UiScale.
+    [ObservableProperty] private int _uiScale = 100;
+
+    partial void OnUiScaleChanged(int value)
+    {
+        OnPropertyChanged(nameof(Zoom));
+        OnPropertyChanged(nameof(OptionsWidth));
+        Remember();
+    }
+
+    /// The percentage as the transform on each window's content wants it.
+    public double Zoom => UiScale / 100.0;
+
+    /// What is offered. Down as well as up: somebody on a laptop fitting more of the tree on the
+    /// page is the same wish as somebody on a 4K screen reading it.
+    public IReadOnlyList<int> UiScales { get; } = [75, 90, 100, 110, 125, 150, 175, 200];
+
+    /// The options window is sized to its content and cannot be resized, so its one fixed
+    /// dimension has to grow with the content.
+    ///
+    /// The main window's own smallest size is deliberately left alone. Scaled with the content it
+    /// would be 1800 wide at 200%, which on a screen narrower than that is a window that cannot be
+    /// brought back; a squeezed layout is the lesser of the two and is undone here.
+    public double OptionsWidth => 460 * Zoom;
+
     /// Whether anything is going on that the window should say is going on.
     ///
     /// The manager's work is the other half of it and was missing: turning a mod on restores and
@@ -286,6 +311,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         LighterApplies = _settings.LighterApplies;
         ReadMemory = _settings.ReadMemory;
         MaskUnusedTextures = _settings.MaskUnusedTextures;
+        UiScale = _settings.UiScale;
         Manager.Packing = Packing;
         _loading = false;
 
@@ -926,7 +952,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             ConfirmChanges = Manager.ConfirmChanges,
             TileSize = Manager.TileSize, ModOrder = (int)Manager.Order, ProtectPacks = ProtectPacks,
             FasterApplies = FasterApplies, LighterApplies = LighterApplies, ReadMemory = ReadMemory,
-            MaskUnusedTextures = MaskUnusedTextures,
+            MaskUnusedTextures = MaskUnusedTextures, UiScale = UiScale,
         };
         // A folder that cannot be written to is not an IOException — it is its own kind — and this
         // runs from a property changing, which is to say from somebody ticking a box. The tool

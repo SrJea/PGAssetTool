@@ -1,15 +1,22 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="using:PGAssetTool.Gui.ViewModels"
+        xmlns:sys="using:System"
         x:Class="PGAssetTool.Gui.Views.OptionsWindow"
         x:DataType="vm:MainViewModel"
-        Title="Options" Icon="/Assets/pgat.ico" Width="460" SizeToContent="Height"
+        Title="Options" Icon="/Assets/pgat.ico" Width="{Binding OptionsWidth}" SizeToContent="Height"
         WindowStartupLocation="CenterOwner" CanResize="False">
 
   <!-- The way out is docked and the settings scroll, so a screen too short for the whole of it
        loses the middle of the list rather than the Close button. It was one stack with Close at the
        bottom, sized to its content and not resizable: at 1920x1080 half the button was below the
        edge of the screen and nothing could bring it back. -->
+  <!-- Scaled with the rest of the tool, so the setting can be read at the size it is setting. -->
+  <LayoutTransformControl>
+    <LayoutTransformControl.LayoutTransform>
+      <ScaleTransform ScaleX="{Binding Zoom}" ScaleY="{Binding Zoom}" />
+    </LayoutTransformControl.LayoutTransform>
+
   <DockPanel>
     <Border DockPanel.Dock="Bottom" Padding="20,10,20,16" BorderThickness="0,1,0,0"
             BorderBrush="#30808080">
@@ -148,7 +155,26 @@
           <TextBlock Classes="why" IsVisible="{Binding #WhyReplaceable.IsChecked}"
                      Text="Hides the transforms, scripts and animation an asset tree is mostly made of. What counts as replaceable follows what the tool can actually write back." />
         </StackPanel>
+
+        <StackPanel Spacing="6">
+          <DockPanel>
+            <ToggleButton DockPanel.Dock="Right" Name="WhyScale" Classes="why" Content="?" />
+            <TextBlock Text="How large everything is drawn" FontWeight="SemiBold" VerticalAlignment="Center" />
+          </DockPanel>
+          <ComboBox ItemsSource="{Binding UiScales}" SelectedItem="{Binding UiScale}"
+                    HorizontalAlignment="Stretch">
+            <ComboBox.ItemTemplate>
+              <DataTemplate x:DataType="sys:Int32">
+                <TextBlock Text="{Binding ., StringFormat='{}{0}%'}" />
+              </DataTemplate>
+            </ComboBox.ItemTemplate>
+          </ComboBox>
+          <TextBlock Classes="why" IsVisible="{Binding #WhyScale.IsChecked}"
+                     Text="The whole of every window, not the text alone: the columns, the spacing and the words grow together, so nothing ends up clipped inside a column that stayed the size it was. It takes effect as it is chosen. Models and pictures are drawn to fit whatever room they are given and are redrawn at the new size; the pictures the game itself ships are magnified along with everything else, as they are by Windows' own display scaling." />
+        </StackPanel>
       </StackPanel>
     </ScrollViewer>
   </DockPanel>
+
+  </LayoutTransformControl>
 </Window>

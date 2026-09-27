@@ -542,6 +542,15 @@ the status line is the only thing on screen that says the tool is doing somethin
 does its work under a flag of its own — so turning a mod on or off left the bar still for the whole
 rewrite. `MainViewModel.Working` is what the bar binds.
 
+**The whole of a window is scaled, not its font size.** `UiScale` is a `ScaleTransform` on a
+`LayoutTransformControl` around each window's content, which takes part in the layout: the columns,
+the paddings and the text grow together. A larger font on its own grows the words inside columns that
+stayed the width they were. `MeshView` rasterises at the scale its own content actually lands on the
+screen at — the transform and the display's own scaling together, read off `TransformToVisual` — so a
+model is drawn once per pixel it is shown at rather than magnified afterwards. The main window's
+minimum size is deliberately not scaled: at 200% it would be 1800 wide, which on a narrower screen is
+a window that cannot be brought back.
+
 ---
 
 ## Verifying a change

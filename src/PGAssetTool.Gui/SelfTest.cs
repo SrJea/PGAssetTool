@@ -1199,6 +1199,7 @@ internal static class SelfTest
                 .ToList();
 
             if (TheFormFitsASmallWindow(model) is { } tooTall) return Fail(tooTall);
+            if (TheScaleReachesTheLayout(model) is { } scaleProblem) return Fail(scaleProblem);
 
             // What is installed is shown as tiles with the picture on top, so a picture that never
             // reaches a control is the whole point of the tab going missing. Counted from the
@@ -3047,6 +3048,22 @@ internal static class SelfTest
         WaitWhile(() => model.Busy, 120_000);
         Avalonia.Threading.Dispatcher.UIThread.RunJobs();
 
+        // The scale picker holds plain numbers and writes the percent sign in with a template, so
+        // what it shows and what it is bound to are two things that can fail apart.
+        var scales = window.GetVisualDescendants().OfType<Avalonia.Controls.ComboBox>()
+            .FirstOrDefault(c => ReferenceEquals(c.ItemsSource, model.UiScales));
+        var shownScale = window.GetVisualDescendants().OfType<Avalonia.Controls.TextBlock>()
+            .Select(t => t.Text)
+            .FirstOrDefault(t => t == $"{model.UiScale}%");
+
+        Console.WriteLine($"options  the scale is {model.UiScale}, the picker holds "
+            + $"{scales?.SelectedItem?.ToString() ?? "nothing"} and shows '{shownScale ?? "nothing"}'");
+
+        if (scales is null) return "the options window offers no UI scale";
+        if (scales.SelectedItem as int? != model.UiScale)
+            return $"the scale is {model.UiScale} and its picker holds {scales.SelectedItem}";
+        if (shownScale is null) return $"the scale picker shows no '{model.UiScale}%' anywhere";
+
         var picker = window.GetVisualDescendants().OfType<Avalonia.Controls.ComboBox>()
             .FirstOrDefault(c => ReferenceEquals(c.ItemsSource, model.Languages));
         var shows = picker?.SelectedValue as string;
@@ -3151,6 +3168,58 @@ internal static class SelfTest
 
         if (buttons.Count != 2) return $"the pack details form shows {buttons.Count} buttons, not two";
         return offscreen > 0 ? $"{offscreen} of the form's buttons fall off a 900x560 window" : null;
+    }
+
+    /// The scale chosen in Options is what the window's content is laid out at.
+    ///
+    /// Measured rather than assumed, because there are two ways to get it wrong that both look right
+    /// in the model: a transform over the top of the layout leaves every size where it was and
+    /// clips, and a binding that resolves to nothing leaves the setting perfectly correct and the
+    /// window exactly as it was. What the content actually gets is the room the window has divided
+    /// by the scale — drawn back out at that scale, that is the whole of it made larger.
+    private static string? TheScaleReachesTheLayout(MainViewModel model)
+    {
+        const double wide = 1200, high = 800;
+        var was = model.UiScale;
+        var window = new Views.MainWindow { DataContext = model, Width = wide, Height = high };
+        window.Show();
+
+        double? Content(int scale)
+        {
+            model.UiScale = scale;
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+            window.Measure(new Avalonia.Size(wide, high));
+            window.Arrange(new Avalonia.Rect(0, 0, wide, high));
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+
+            return window.GetVisualDescendants().OfType<Avalonia.Controls.LayoutTransformControl>()
+                .FirstOrDefault()?.Child?.Bounds.Width;
+        }
+
+        try
+        {
+            var plain = Content(100);
+            var larger = Content(150);
+
+            Console.WriteLine($"scale    in a {wide:0} window the content is laid out {plain:0} wide "
+                + $"at 100% and {larger:0} at 150%");
+
+            if (plain is null || larger is null) return "the window has no scaled content to measure";
+            if (Math.Abs(plain.Value - wide) > 2)
+                return $"at 100% the content is {plain:0} wide in a {wide:0} window, not the whole of it";
+
+            // Two thirds of the room, so that everything in it comes out half again as large.
+            var wanted = wide / 1.5;
+            return Math.Abs(larger.Value - wanted) > 2
+                ? $"at 150% the content was given {larger:0} of {wide:0}, and {wanted:0} is what 150% means"
+                : null;
+        }
+        finally
+        {
+            model.UiScale = was;
+            window.Close();
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+        }
     }
 
     /// How wide the first tile in the manager is actually being drawn, or null when there is none.
