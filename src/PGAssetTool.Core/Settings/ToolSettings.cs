@@ -72,14 +72,25 @@ public sealed record ToolSettings
     /// once and meant to stay set.
     public int TileSize { get; init; } = 112;
 
+    /// How large the windows draw themselves, as a percentage of their own layout.
+    ///
+    /// 100 is what every size in the views is written in. The whole of a window is scaled rather
+    /// than its text alone: a larger font in a column of a fixed width reads as clipped text, not
+    /// as a larger interface. Held as a percentage because that is what the setting says.
+    public int UiScale { get; init; } = 100;
+
     /// What the manager arranges its tiles by: 0 is the order they were installed in, 1 is by the
     /// item each one is for. Held as a number because this file is the tool's own and the name of
     /// an ordering is a thing the interface decides, not the settings.
     public int ModOrder { get; init; }
 
-    /// Whether a newly extracted workspace builds a signed, scrambled pack by default. Off, because
-    /// a plain zip is easier to look inside and most packs never leave the machine that made them.
-    public bool ProtectPacks { get; init; }
+    /// Whether a newly extracted workspace builds a signed, scrambled pack by default.
+    ///
+    /// On. A pack that leaves the machine that built it is the one this decision is about, and a
+    /// signature is worth nothing added afterwards: it says who built *this* file, so it has to be
+    /// there from the build. Building plain is a thing to ask for — in Options, or per pack in the
+    /// editor — and looking inside your own workspace needs no pack at all.
+    public bool ProtectPacks { get; init; } = true;
 
     /// Whether writing to the game is done for speed rather than for size.
     ///

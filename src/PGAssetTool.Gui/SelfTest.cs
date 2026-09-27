@@ -455,6 +455,8 @@ internal static class SelfTest
             if (model.Detail is not { } refiltered || CountRows(refiltered.Roots) != everything)
                 return Fail("turning the filter back on did not restore the tree");
 
+            if (RelatedPicturesSurviveTheFilter(model) is { } relatedProblem) return Fail(relatedProblem);
+
             // Everything above exercises the models. The window is where a binding can quietly
             // undo them, so it is built and read back too.
             var window = new Views.MainWindow { DataContext = model };
@@ -1197,6 +1199,7 @@ internal static class SelfTest
                 .ToList();
 
             if (TheFormFitsASmallWindow(model) is { } tooTall) return Fail(tooTall);
+            if (TheScaleReachesTheLayout(model) is { } scaleProblem) return Fail(scaleProblem);
 
             // What is installed is shown as tiles with the picture on top, so a picture that never
             // reaches a control is the whole point of the tab going missing. Counted from the
@@ -1256,11 +1259,26 @@ internal static class SelfTest
             if (multi < 1) return Fail("no list in the manager accepts more than one row");
             Console.WriteLine($"manager  asked: {model.Manager.Asking.Title}");
 
+            // The bar in the status line is the only thing on screen that says the tool is doing
+            // something, and the window binds the shell's answer rather than the manager's — so
+            // turning a mod on or off left it still for the whole of the rewrite. Watched rather
+            // than sampled: the work is over in a second or two, and a look afterwards always finds
+            // it finished.
+            var moved = false;
+            void Moving(object? _, System.ComponentModel.PropertyChangedEventArgs e)
+            {
+                if (e.PropertyName == nameof(MainViewModel.Working) && model.Working && model.Manager.Busy)
+                    moved = true;
+            }
+            model.PropertyChanged += Moving;
+
             var turning = System.Diagnostics.Stopwatch.StartNew();
             model.Manager.ProceedCommand.Execute(null);
-            // The manager reports its own busy state; the shell is not involved in this one.
             WaitWhile(() => model.Manager.Busy || model.Manager.Asking is not null, 180_000);
+            model.PropertyChanged -= Moving;
             Console.WriteLine($"manager  {model.Manager.Status}");
+            Console.WriteLine($"manager  the window said it was working while the manager was: {moved}");
+            if (!moved) return Fail("the manager rewrote the game and the window showed nothing happening");
             Console.WriteLine($"timing   turning one mod off took {turning.ElapsedMilliseconds}ms");
 
             var mineNow = model.Manager.Mods.First(m => m.Mod.Id == PackIdentity);
@@ -2358,6 +2376,55 @@ internal static class SelfTest
         return null;
     }
 
+    /// The pictures filed beside a weapon are in the tree when the tree is filtered to what can be
+    /// replaced — because they can be.
+    ///
+    /// A weapon's chat icon and each skin's shop icon are registered against the weapon's number
+    /// rather than pointed at by anything in its prefab, so they arrive as paths and the whole group
+    /// of them used to go when the filter went on. They are textures an extract writes out and a
+    /// pack replaces, which is exactly what the filter promises to show; two per weapon were missing
+    /// from it. The row has to carry the object as well as the path, or it can be read and not
+    /// looked at.
+    private static string? RelatedPicturesSurviveTheFilter(MainViewModel model)
+    {
+        static List<TreeNode> Rows(WeaponDetailViewModel detail)
+            => detail.Roots.FirstOrDefault(r => r.Label == "Related")?.Children
+                .SelectMany(space => space.Children).ToList() ?? [];
+
+        if (model.Detail is not { } filtered) return "there is no tree to look at";
+        var kept = Rows(filtered);
+
+        var was = model.ReplaceableOnly;
+        model.ReplaceableOnly = false;
+        var all = model.Detail is { } unfiltered ? Rows(unfiltered) : [];
+        model.ReplaceableOnly = was;
+
+        Console.WriteLine($"related  {kept.Count} of {all.Count} rows kept by the filter: "
+            + string.Join(", ", kept.Select(r => $"{r.Label} ({r.Class})")));
+
+        if (all.Count == 0) return "this weapon has no related assets and it has a chat icon";
+        if (kept.Count == 0) return "the filter dropped every related asset";
+        if (kept.Count >= all.Count) return "the filter kept every related asset, replaceable or not";
+
+        var chat = kept.FirstOrDefault(r => r.Label.EndsWith("_chaticon", StringComparison.OrdinalIgnoreCase));
+        if (chat is null) return "the chat icon is not in the filtered tree";
+        if (chat.Class != AssetClassID.Texture2D) return $"the chat icon is listed as a {chat.Class}";
+        if (chat.PathId == 0) return "the chat icon row carries no path id, so it cannot be looked at";
+
+        // And it shows. The path id comes from the bundle's own container table rather than from a
+        // search by name, so this is where a wrong answer from that table would appear.
+        model.Preview.Clear();
+        if (model.Detail is not { } showing) return "the tree went away while the filter was put back";
+        var row = Rows(showing).FirstOrDefault(r => r.Label == chat.Label);
+        if (row is null) return "the chat icon left the tree when the filter was put back";
+
+        showing.SelectedNode = row;
+        Arrived(model, row);
+
+        Console.WriteLine($"related  {row.Label}: {model.Preview.Caption}");
+        return model.Preview.Nothing is { } why ? $"the chat icon could not be shown: {why}" : null;
+    }
+
     /// What an export clears out of a texture is never anything the model shows.
     ///
     /// The mask is worked out in UV space and written into an image that is stored the other way up,
@@ -2981,6 +3048,22 @@ internal static class SelfTest
         WaitWhile(() => model.Busy, 120_000);
         Avalonia.Threading.Dispatcher.UIThread.RunJobs();
 
+        // The scale picker holds plain numbers and writes the percent sign in with a template, so
+        // what it shows and what it is bound to are two things that can fail apart.
+        var scales = window.GetVisualDescendants().OfType<Avalonia.Controls.ComboBox>()
+            .FirstOrDefault(c => ReferenceEquals(c.ItemsSource, model.UiScales));
+        var shownScale = window.GetVisualDescendants().OfType<Avalonia.Controls.TextBlock>()
+            .Select(t => t.Text)
+            .FirstOrDefault(t => t == $"{model.UiScale}%");
+
+        Console.WriteLine($"options  the scale is {model.UiScale}, the picker holds "
+            + $"{scales?.SelectedItem?.ToString() ?? "nothing"} and shows '{shownScale ?? "nothing"}'");
+
+        if (scales is null) return "the options window offers no UI scale";
+        if (scales.SelectedItem as int? != model.UiScale)
+            return $"the scale is {model.UiScale} and its picker holds {scales.SelectedItem}";
+        if (shownScale is null) return $"the scale picker shows no '{model.UiScale}%' anywhere";
+
         var picker = window.GetVisualDescendants().OfType<Avalonia.Controls.ComboBox>()
             .FirstOrDefault(c => ReferenceEquals(c.ItemsSource, model.Languages));
         var shows = picker?.SelectedValue as string;
@@ -3085,6 +3168,58 @@ internal static class SelfTest
 
         if (buttons.Count != 2) return $"the pack details form shows {buttons.Count} buttons, not two";
         return offscreen > 0 ? $"{offscreen} of the form's buttons fall off a 900x560 window" : null;
+    }
+
+    /// The scale chosen in Options is what the window's content is laid out at.
+    ///
+    /// Measured rather than assumed, because there are two ways to get it wrong that both look right
+    /// in the model: a transform over the top of the layout leaves every size where it was and
+    /// clips, and a binding that resolves to nothing leaves the setting perfectly correct and the
+    /// window exactly as it was. What the content actually gets is the room the window has divided
+    /// by the scale — drawn back out at that scale, that is the whole of it made larger.
+    private static string? TheScaleReachesTheLayout(MainViewModel model)
+    {
+        const double wide = 1200, high = 800;
+        var was = model.UiScale;
+        var window = new Views.MainWindow { DataContext = model, Width = wide, Height = high };
+        window.Show();
+
+        double? Content(int scale)
+        {
+            model.UiScale = scale;
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+            window.Measure(new Avalonia.Size(wide, high));
+            window.Arrange(new Avalonia.Rect(0, 0, wide, high));
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+
+            return window.GetVisualDescendants().OfType<Avalonia.Controls.LayoutTransformControl>()
+                .FirstOrDefault()?.Child?.Bounds.Width;
+        }
+
+        try
+        {
+            var plain = Content(100);
+            var larger = Content(150);
+
+            Console.WriteLine($"scale    in a {wide:0} window the content is laid out {plain:0} wide "
+                + $"at 100% and {larger:0} at 150%");
+
+            if (plain is null || larger is null) return "the window has no scaled content to measure";
+            if (Math.Abs(plain.Value - wide) > 2)
+                return $"at 100% the content is {plain:0} wide in a {wide:0} window, not the whole of it";
+
+            // Two thirds of the room, so that everything in it comes out half again as large.
+            var wanted = wide / 1.5;
+            return Math.Abs(larger.Value - wanted) > 2
+                ? $"at 150% the content was given {larger:0} of {wide:0}, and {wanted:0} is what 150% means"
+                : null;
+        }
+        finally
+        {
+            model.UiScale = was;
+            window.Close();
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+        }
     }
 
     /// How wide the first tile in the manager is actually being drawn, or null when there is none.

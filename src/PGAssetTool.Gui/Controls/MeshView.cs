@@ -164,10 +164,32 @@ public sealed class MeshView : Control
         Camera = Camera.Zoomed(e.Delta.Y > 0 ? 0.88f : 1.14f);
     }
 
+    /// How many device pixels one unit of this control's own layout is drawn as.
+    ///
+    /// The scale of the screen and the scale the window is drawn at, together, read off the way this
+    /// control actually lands on it rather than asked of either separately. The model is rasterised
+    /// at that many pixels and drawn back into the room the layout gave it, so it is drawn once per
+    /// pixel it is shown at: rendered at the layout's own size and left to be magnified, a model on
+    /// a 150% display — or in a window scaled up in Options — came out soft, which on a model is
+    /// most visible on exactly the thin edges somebody is looking at.
+    ///
+    /// One, unless something says otherwise: nothing in the visual tree is a transform in the
+    /// headless runs, and the arithmetic below then leaves the size exactly as it was.
+    private double PixelsPerUnit
+    {
+        get
+        {
+            if (VisualRoot is not { } root) return 1;
+            var scale = this.TransformToVisual((Visual)root)?.M11 ?? 1;
+            return scale > 0 ? scale * root.RenderScaling : 1;
+        }
+    }
+
     public override void Render(DrawingContext context)
     {
-        var width = (int)Bounds.Width;
-        var height = (int)Bounds.Height;
+        var scale = PixelsPerUnit;
+        var width = (int)(Bounds.Width * scale);
+        var height = (int)(Bounds.Height * scale);
         if (Mesh is not { } mesh || width < 2 || height < 2) return;
 
         if (_bitmap is null || _size.Width != width || _size.Height != height)
@@ -183,6 +205,7 @@ public sealed class MeshView : Control
         using (var locked = _bitmap.Lock())
             System.Runtime.InteropServices.Marshal.Copy(_target.Bgra, 0, locked.Address, _target.Bgra.Length);
 
-        context.DrawImage(_bitmap, new Rect(0, 0, width, height));
+        // Into the room the layout gave it, which is what `width` and `height` are a multiple of.
+        context.DrawImage(_bitmap, new Rect(0, 0, Bounds.Width, Bounds.Height));
     }
 }

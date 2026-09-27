@@ -175,6 +175,16 @@
     <KeyBinding Gesture="Ctrl+D3" Command="{Binding ShowManagerCommand}" />
   </Window.KeyBindings>
 
+  <!-- Everything below is drawn at the scale Options asks for. A transform that takes part in the
+       layout rather than one laid over the top of it: at 125% the columns, the paddings and the text
+       all grow together, which a larger font on its own does not do — it grows the words inside
+       columns that stayed the width they were. At 100 the content measures and arranges exactly as
+       it did before this was here. The content keeps its own indentation. -->
+  <LayoutTransformControl>
+    <LayoutTransformControl.LayoutTransform>
+      <ScaleTransform ScaleX="{Binding Zoom}" ScaleY="{Binding Zoom}" />
+    </LayoutTransformControl.LayoutTransform>
+
   <DockPanel>
 
     <!-- The checkable items are bound one way and toggled by their command: a checkable MenuItem
@@ -254,7 +264,7 @@
     <Border DockPanel.Dock="Bottom" Height="26" Background="#18181b" Padding="10,0">
       <Grid ColumnDefinitions="Auto,*">
         <ProgressBar Grid.Column="0" Width="80" Height="3" Margin="0,0,10,0"
-                     IsIndeterminate="True" IsVisible="{Binding Busy}" VerticalAlignment="Center" />
+                     IsIndeterminate="True" IsVisible="{Binding Working}" VerticalAlignment="Center" />
         <TextBlock Grid.Column="1" Text="{Binding Status}" Classes="dim" VerticalAlignment="Center" />
       </Grid>
     </Border>
@@ -716,4 +726,6 @@
 
     </TabControl>
   </DockPanel>
+
+  </LayoutTransformControl>
 </Window>

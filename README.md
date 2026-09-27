@@ -130,6 +130,10 @@ causes trouble, name it yourself in **File → Options** — the folder holding 
 
 **A bundle was changed by something else** - The data this tool is about to change has already been changed some other way. Put the original data back with Steam's integrity check.
 
+**The text and the buttons are too small, or too large** - *How large everything is drawn*, in
+**File → Options**, goes from 75% to 200%. The whole window is scaled rather than the text alone, so the
+column widths and the spacing grow with it.
+
 **The tool uses too much memory** - Two settings in **File → Options** trade speed for it. *Memory for reading
 the game faster* is how much of the bundles you browse is kept unpacked, 1GB by default; less makes selecting
 and extracting slower. *Rebuild one bundle at a time* makes installing and toggling about a third slower for

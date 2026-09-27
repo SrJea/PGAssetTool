@@ -65,6 +65,24 @@ name and class find it instead.
 the object. Every shader in the game has an empty `m_Name`, so anything reading the obvious field
 finds nothing.
 
+### A path out of the lookup table becomes an object through the bundle's own table
+
+The third join gives paths, not objects: `WeaponChatIcons/Weapon25_chaticon` is registered against a
+bundle and nothing more. Every bundle carries an `AssetBundle` object whose `m_Container` is the map
+the game itself loads by — that path, written as the folder it was authored in plus an extension and
+folded to lower case — so `BundleContents` turns one into a path id, and thereby into a class,
+without reading anything else in the bundle.
+
+That is why it is not a search by name. A search reads the name of every object that might match,
+a name is not unique inside a bundle, and it answers whatever else happened to share the name: asked
+for a skin's definition, it came back with a texture called the same thing. Over 60 weapons' 237
+related assets the container table resolved every one, at 1.6ms a weapon against 14ms for the search.
+
+The class is what tells a picture from a piece of configuration, and so what lets the tree keep a
+chat icon and a skin's shop icon when it is filtered to what can be replaced. Before this the whole
+group went, on the strength of their being paths rather than objects — while an extract wrote them
+out and a pack replaced them.
+
 ---
 
 ## What can be written back
@@ -222,6 +240,11 @@ that does.
 The scrambling stops a pack being renamed to `.zip` and opened. It stops nothing else — this
 repository says exactly how to undo it — and is not meant to. What it is for is that somebody's work
 is not casually lifted out of the file they published.
+
+A new pack is protected. The pack that leaves the machine that built it is what the decision is
+about, and a signature added afterwards says nothing — it says who built *this* file, so it has to
+be there from the build. Options turns it off for every pack and the editor for one; the CLI has no
+settings, so there `--protect` is how to ask.
 
 `PackFile` is the one place that layout is written down. Do not duplicate it anywhere else, tests
 included; that has already been wrong once.
@@ -518,6 +541,20 @@ memory.
 A three-state checkbox turned protection off on its first click, and only Save made anything stick.
 And because any write to a workspace makes the editor read it again, a re-read keeps text typed and
 not yet saved rather than refilling the form from disk, which it used to do without a word.
+
+**The window's busy flag and the manager's are two flags, and the status bar shows both.** The bar in
+the status line is the only thing on screen that says the tool is doing something, and the manager
+does its work under a flag of its own — so turning a mod on or off left the bar still for the whole
+rewrite. `MainViewModel.Working` is what the bar binds.
+
+**The whole of a window is scaled, not its font size.** `UiScale` is a `ScaleTransform` on a
+`LayoutTransformControl` around each window's content, which takes part in the layout: the columns,
+the paddings and the text grow together. A larger font on its own grows the words inside columns that
+stayed the width they were. `MeshView` rasterises at the scale its own content actually lands on the
+screen at — the transform and the display's own scaling together, read off `TransformToVisual` — so a
+model is drawn once per pixel it is shown at rather than magnified afterwards. The main window's
+minimum size is deliberately not scaled: at 200% it would be 1800 wide, which on a narrower screen is
+a window that cannot be brought back.
 
 ---
 

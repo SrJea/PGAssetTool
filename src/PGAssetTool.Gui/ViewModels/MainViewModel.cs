@@ -50,11 +50,49 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             if (e.PropertyName is nameof(ManagerViewModel.ConfirmChanges) or nameof(ManagerViewModel.TileSize)
                 or nameof(ManagerViewModel.Order))
                 Remember();
+
+            if (e.PropertyName is nameof(ManagerViewModel.Busy)) OnPropertyChanged(nameof(Working));
         };
     }
 
     [ObservableProperty] private string _status = "Looking for the game…";
     [ObservableProperty] private bool _busy = true;
+
+    partial void OnBusyChanged(bool value) => OnPropertyChanged(nameof(Working));
+
+    /// How large the windows draw themselves, as a percentage. See ToolSettings.UiScale.
+    [ObservableProperty] private int _uiScale = 100;
+
+    partial void OnUiScaleChanged(int value)
+    {
+        OnPropertyChanged(nameof(Zoom));
+        OnPropertyChanged(nameof(OptionsWidth));
+        Remember();
+    }
+
+    /// The percentage as the transform on each window's content wants it.
+    public double Zoom => UiScale / 100.0;
+
+    /// What is offered. Down as well as up: somebody on a laptop fitting more of the tree on the
+    /// page is the same wish as somebody on a 4K screen reading it.
+    public IReadOnlyList<int> UiScales { get; } = [75, 90, 100, 110, 125, 150, 175, 200];
+
+    /// The options window is sized to its content and cannot be resized, so its one fixed
+    /// dimension has to grow with the content.
+    ///
+    /// The main window's own smallest size is deliberately left alone. Scaled with the content it
+    /// would be 1800 wide at 200%, which on a screen narrower than that is a window that cannot be
+    /// brought back; a squeezed layout is the lesser of the two and is undone here.
+    public double OptionsWidth => 460 * Zoom;
+
+    /// Whether anything is going on that the window should say is going on.
+    ///
+    /// The manager's work is the other half of it and was missing: turning a mod on restores and
+    /// rewrites bundles for a second or two, on its own tab, and the bar in the status line — the
+    /// one thing on screen that says the tool is doing something — stayed still throughout, because
+    /// the manager keeps a busy flag of its own and this is what the window binds.
+    public bool Working => Busy || Manager.Busy;
+
     [ObservableProperty] private string _search = "";
     [ObservableProperty] private WeaponListItem? _selected;
     [ObservableProperty] private WeaponDetailViewModel? _detail;
@@ -133,7 +171,11 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             : "Not open. It has to be the folder holding the game's own *_Data directory.";
 
     /// Whether a built pack is signed and scrambled unless its own manifest says otherwise.
-    [ObservableProperty] private bool _protectPacks;
+    ///
+    /// Starts where ToolSettings starts, and has to: the editor is told what this answers only when
+    /// it changes, so a saved 'off' read into a field that was already 'off' would tell it nothing
+    /// and leave its list naming the wrong answer.
+    [ObservableProperty] private bool _protectPacks = true;
 
     partial void OnProtectPacksChanged(bool value)
     {
@@ -273,6 +315,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         LighterApplies = _settings.LighterApplies;
         ReadMemory = _settings.ReadMemory;
         MaskUnusedTextures = _settings.MaskUnusedTextures;
+        UiScale = _settings.UiScale;
         Manager.Packing = Packing;
         _loading = false;
 
@@ -913,7 +956,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             ConfirmChanges = Manager.ConfirmChanges,
             TileSize = Manager.TileSize, ModOrder = (int)Manager.Order, ProtectPacks = ProtectPacks,
             FasterApplies = FasterApplies, LighterApplies = LighterApplies, ReadMemory = ReadMemory,
-            MaskUnusedTextures = MaskUnusedTextures,
+            MaskUnusedTextures = MaskUnusedTextures, UiScale = UiScale,
         };
         // A folder that cannot be written to is not an IOException — it is its own kind — and this
         // runs from a property changing, which is to say from somebody ticking a box. The tool

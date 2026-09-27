@@ -1,3 +1,5 @@
+using Avalonia;
+using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
@@ -56,6 +58,10 @@ public partial class MainWindow : Window
         // walk the list, which is what a person reaches for first anyway.
         Opened += (_, _) => this.FindControl<ListBox>("Weapons")?.Focus();
 
+        // What the view asks for, read before anything has had a chance to change it: the size the
+        // layout below was drawn against, at a scale of 100.
+        (_designedWidth, _designedHeight) = (Width, Height);
+
         // Everything else the menu does is a command on the model. Focus is the exception: the
         // control belongs to the view, so the model only reports that someone asked for it.
         DataContextChanged += (_, _) =>
@@ -63,6 +69,14 @@ public partial class MainWindow : Window
             if (DataContext is not MainViewModel model) return;
 
             model.SearchRequested += FocusSearch;
+
+            // The scale is read out of the settings after the window is up, so this is also how it
+            // is applied at startup rather than only when somebody changes it.
+            model.PropertyChanged += (_, changed) =>
+            {
+                if (changed.PropertyName == nameof(MainViewModel.UiScale)) GrowToFit(model.Zoom);
+            };
+            GrowToFit(model.Zoom);
 
             // Animations play on this window's own frames, by the time that really passed between
             // them — so a 120Hz screen shows 120 steps a second rather than a fixed thirty.
@@ -86,6 +100,36 @@ public partial class MainWindow : Window
     /// Polls whether the game is running. Stopped when the window goes, or a closed window would
     /// keep a model alive and keep asking Windows about processes on its behalf.
     private Avalonia.Threading.DispatcherTimer? _watchingTheGame;
+
+    /// The size the view asks for, which is the size the layout was drawn at 100% against.
+    private readonly double _designedWidth, _designedHeight;
+
+    /// Gives a window drawn larger than 100% the room to draw it in.
+    ///
+    /// The content of a window at 150% is given two thirds of it, which is less than the layout was
+    /// drawn for — so the same window at a larger scale shows a cramped version of itself rather
+    /// than a larger one. Grown from the designed size rather than from the current one, so choosing
+    /// 125 and then 150 does not multiply twice.
+    ///
+    /// Capped to the screen, since the reason for a larger scale is often a screen that cannot take
+    /// a larger window; and never made smaller, because turning the scale back down while shrinking
+    /// the window would be deciding for somebody how much they want to see at once.
+    ///
+    /// Only the window the application itself opened. The self-test builds windows at exact sizes
+    /// and then measures what fits in them.
+    private void GrowToFit(double zoom)
+    {
+        if (!ReferenceEquals(
+                this,
+                (Application.Current?.ApplicationLifetime as IClassicDesktopStyleApplicationLifetime)?.MainWindow))
+            return;
+
+        if (zoom <= 1 || Screens.ScreenFromWindow(this) is not { } screen) return;
+
+        var room = screen.WorkingArea;
+        Width = Math.Max(Width, Math.Min(_designedWidth * zoom, room.Width / screen.Scaling * 0.95));
+        Height = Math.Max(Height, Math.Min(_designedHeight * zoom, room.Height / screen.Scaling * 0.9));
+    }
 
     protected override void OnClosed(EventArgs e)
     {
