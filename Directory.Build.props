@@ -6,7 +6,7 @@
     <DebugType>embedded</DebugType>
 
     <!-- The tool's own version, which a pack's forum post quotes. One number for every project. -->
-    <Version>1.0.4</Version>
+    <Version>1.0.5</Version>
   </PropertyGroup>
 
 </Project>
