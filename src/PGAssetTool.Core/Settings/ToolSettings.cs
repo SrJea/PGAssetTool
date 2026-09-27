@@ -84,9 +84,13 @@ public sealed record ToolSettings
     /// an ordering is a thing the interface decides, not the settings.
     public int ModOrder { get; init; }
 
-    /// Whether a newly extracted workspace builds a signed, scrambled pack by default. Off, because
-    /// a plain zip is easier to look inside and most packs never leave the machine that made them.
-    public bool ProtectPacks { get; init; }
+    /// Whether a newly extracted workspace builds a signed, scrambled pack by default.
+    ///
+    /// On. A pack that leaves the machine that built it is the one this decision is about, and a
+    /// signature is worth nothing added afterwards: it says who built *this* file, so it has to be
+    /// there from the build. Building plain is a thing to ask for — in Options, or per pack in the
+    /// editor — and looking inside your own workspace needs no pack at all.
+    public bool ProtectPacks { get; init; } = true;
 
     /// Whether writing to the game is done for speed rather than for size.
     ///

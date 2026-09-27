@@ -241,6 +241,11 @@ The scrambling stops a pack being renamed to `.zip` and opened. It stops nothing
 repository says exactly how to undo it — and is not meant to. What it is for is that somebody's work
 is not casually lifted out of the file they published.
 
+A new pack is protected. The pack that leaves the machine that built it is what the decision is
+about, and a signature added afterwards says nothing — it says who built *this* file, so it has to
+be there from the build. Options turns it off for every pack and the editor for one; the CLI has no
+settings, so there `--protect` is how to ask.
+
 `PackFile` is the one place that layout is written down. Do not duplicate it anywhere else, tests
 included; that has already been wrong once.
 

@@ -171,7 +171,11 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             : "Not open. It has to be the folder holding the game's own *_Data directory.";
 
     /// Whether a built pack is signed and scrambled unless its own manifest says otherwise.
-    [ObservableProperty] private bool _protectPacks;
+    ///
+    /// Starts where ToolSettings starts, and has to: the editor is told what this answers only when
+    /// it changes, so a saved 'off' read into a field that was already 'off' would tell it nothing
+    /// and leave its list naming the wrong answer.
+    [ObservableProperty] private bool _protectPacks = true;
 
     partial void OnProtectPacksChanged(bool value)
     {

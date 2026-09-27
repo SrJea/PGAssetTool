@@ -189,7 +189,7 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
     /// happen is read rather than remembered.
     public IReadOnlyList<ProtectChoice> ProtectChoices { get; } =
     [
-        new(null, "As Options says — not protected"),
+        new(null, "As Options says — protected"),
         new(true, "Protect this pack"),
         new(false, "Don't protect this pack"),
     ];
@@ -208,7 +208,8 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
         }
     }
 
-    private bool _protectsByDefault;
+    /// Starts where the setting starts, so the label above is true before anybody touches it.
+    private bool _protectsByDefault = true;
 
     /// Set while the form is being filled from disk, so filling it is not mistaken for a choice.
     private bool _loading;
