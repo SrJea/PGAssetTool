@@ -62,5 +62,5 @@ public class ForumPostTests
 
     [Fact]
     public void TheToolVersionIsTheProjectsWithoutTheCommit()
-        => Assert.Equal("1.0.5", ForumPost.ToolVersion);
+        => Assert.Equal("1.0.6", ForumPost.ToolVersion);
 }
