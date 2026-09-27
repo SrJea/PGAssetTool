@@ -455,6 +455,8 @@ internal static class SelfTest
             if (model.Detail is not { } refiltered || CountRows(refiltered.Roots) != everything)
                 return Fail("turning the filter back on did not restore the tree");
 
+            if (RelatedPicturesSurviveTheFilter(model) is { } relatedProblem) return Fail(relatedProblem);
+
             // Everything above exercises the models. The window is where a binding can quietly
             // undo them, so it is built and read back too.
             var window = new Views.MainWindow { DataContext = model };
@@ -2356,6 +2358,55 @@ internal static class SelfTest
         }
 
         return null;
+    }
+
+    /// The pictures filed beside a weapon are in the tree when the tree is filtered to what can be
+    /// replaced — because they can be.
+    ///
+    /// A weapon's chat icon and each skin's shop icon are registered against the weapon's number
+    /// rather than pointed at by anything in its prefab, so they arrive as paths and the whole group
+    /// of them used to go when the filter went on. They are textures an extract writes out and a
+    /// pack replaces, which is exactly what the filter promises to show; two per weapon were missing
+    /// from it. The row has to carry the object as well as the path, or it can be read and not
+    /// looked at.
+    private static string? RelatedPicturesSurviveTheFilter(MainViewModel model)
+    {
+        static List<TreeNode> Rows(WeaponDetailViewModel detail)
+            => detail.Roots.FirstOrDefault(r => r.Label == "Related")?.Children
+                .SelectMany(space => space.Children).ToList() ?? [];
+
+        if (model.Detail is not { } filtered) return "there is no tree to look at";
+        var kept = Rows(filtered);
+
+        var was = model.ReplaceableOnly;
+        model.ReplaceableOnly = false;
+        var all = model.Detail is { } unfiltered ? Rows(unfiltered) : [];
+        model.ReplaceableOnly = was;
+
+        Console.WriteLine($"related  {kept.Count} of {all.Count} rows kept by the filter: "
+            + string.Join(", ", kept.Select(r => $"{r.Label} ({r.Class})")));
+
+        if (all.Count == 0) return "this weapon has no related assets and it has a chat icon";
+        if (kept.Count == 0) return "the filter dropped every related asset";
+        if (kept.Count >= all.Count) return "the filter kept every related asset, replaceable or not";
+
+        var chat = kept.FirstOrDefault(r => r.Label.EndsWith("_chaticon", StringComparison.OrdinalIgnoreCase));
+        if (chat is null) return "the chat icon is not in the filtered tree";
+        if (chat.Class != AssetClassID.Texture2D) return $"the chat icon is listed as a {chat.Class}";
+        if (chat.PathId == 0) return "the chat icon row carries no path id, so it cannot be looked at";
+
+        // And it shows. The path id comes from the bundle's own container table rather than from a
+        // search by name, so this is where a wrong answer from that table would appear.
+        model.Preview.Clear();
+        if (model.Detail is not { } showing) return "the tree went away while the filter was put back";
+        var row = Rows(showing).FirstOrDefault(r => r.Label == chat.Label);
+        if (row is null) return "the chat icon left the tree when the filter was put back";
+
+        showing.SelectedNode = row;
+        Arrived(model, row);
+
+        Console.WriteLine($"related  {row.Label}: {model.Preview.Caption}");
+        return model.Preview.Nothing is { } why ? $"the chat icon could not be shown: {why}" : null;
     }
 
     /// What an export clears out of a texture is never anything the model shows.

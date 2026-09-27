@@ -234,16 +234,29 @@ public sealed partial class WeaponDetailViewModel : ObservableObject
             roots.Add(skins);
         }
 
-        // Related assets are paths, not objects: nothing here can be replaced through them, so the
-        // filter takes them out along with everything else that is only context.
-        if (tree.Related.Count > 0 && !replaceableOnly)
+        // Filtered, this keeps the ones that resolved to something replaceable and drops the rest.
+        // The whole group used to go, on the strength of these being paths rather than objects —
+        // but a chat icon and a skin's shop icon are textures the extract writes out and a pack
+        // replaces, so what the filter promises to show was leaving out two of them per weapon.
+        var listed = replaceableOnly
+            ? tree.Related.Where(r => r.Asset is not null).ToList()
+            : tree.Related;
+
+        if (listed.Count > 0)
         {
-            var related = new TreeNode("Related", $"{tree.Related.Count}");
-            foreach (var group in tree.Related.GroupBy(r => r.Namespace).OrderBy(g => g.Key, StringComparer.Ordinal))
+            var related = new TreeNode("Related", $"{listed.Count}");
+            foreach (var group in listed.GroupBy(r => r.Namespace).OrderBy(g => g.Key, StringComparer.Ordinal))
             {
                 var space = new TreeNode(group.Key, $"{group.Count()}");
                 foreach (var asset in group)
-                    space.With(new TreeNode(asset.Path, asset.Bundle));
+                    // Named by its path, which is what says which weapon's icon this is; the row is
+                    // the object itself where there is one behind it, so it can be looked at.
+                    // A picture reached this way is one of the game's flat ones — a shop icon, a
+                    // chat icon — so its alpha means transparency, as the weapon's own icon's does.
+                    space.With(asset.Asset is { } resolved
+                        ? new TreeNode(asset.Path, asset.Bundle, resolved.Class, resolved.PathId, resolved.Bundle,
+                            alphaIsCoverage: resolved.Class == AssetClassID.Texture2D)
+                        : new TreeNode(asset.Path, asset.Bundle));
                 related.With(space);
             }
             roots.Add(related);

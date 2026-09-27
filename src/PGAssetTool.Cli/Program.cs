@@ -533,7 +533,9 @@ if (tree.Related.Count > 0)
     {
         Console.WriteLine($"    {group.Key} ({group.Count()})");
         foreach (var asset in group)
-            Console.WriteLine($"      {TextColumn.Pad(asset.Path, 66)} @ {asset.Bundle ?? "?"}");
+            // The class only for the ones that can be written back, which is what saying it is for.
+            Console.WriteLine($"      {TextColumn.Pad(asset.Path, 66)} @ {asset.Bundle ?? "?"}"
+                + (asset.Asset is { } resolved ? $"  {resolved.Class}" : ""));
     }
 }
 

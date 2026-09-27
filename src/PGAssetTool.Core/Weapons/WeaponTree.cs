@@ -80,7 +80,13 @@ public sealed record SkinMaterial(
 public sealed record MeshTextures(long MeshPathId, IReadOnlyList<AssetNode?> BySubMesh);
 
 /// An asset tied to the weapon by the number in its name rather than by a binary reference.
-public sealed record RelatedAsset(string Namespace, string Path, string? Bundle);
+/// <param name="Asset">
+/// The object the path names, when it is one this tool can write back — the chat icon and a skin's
+/// shop icon are textures like any other, and an extract writes them out. Null for the rest: a skin
+/// definition and a profile animation are context, and there is nothing to be done with them but
+/// read where they live. Resolved through the bundle's own container table; see `BundleContents`.
+/// </param>
+public sealed record RelatedAsset(string Namespace, string Path, string? Bundle, AssetNode? Asset = null);
 
 public sealed record WeaponTree(
     WeaponRecord Record,
@@ -99,6 +105,11 @@ public sealed record WeaponTree(
 public sealed class WeaponResolver(BundleSet bundles, GameCatalogs catalogs)
 {
     private readonly IconResolver _icons = new(bundles, catalogs.Lookup);
+
+    /// Kept for the life of the resolver: a container table read for one weapon's icons is the same
+    /// table the next weapon's are in.
+    private readonly BundleContents _contents = new(bundles);
+
     /// How a material binds its paint is the same question wherever it is asked from, and the
     /// editor asks it too — of a mesh rather than of a weapon. One implementation of it, here.
     private readonly Dressing _dressing = new(bundles);
@@ -170,7 +181,7 @@ public sealed class WeaponResolver(BundleSet bundles, GameCatalogs catalogs)
 
         // The skin materials are already listed under each skin, so they are left out here.
         var related = Related(record, prefabPath)
-            .Select(p => new RelatedAsset(NamespaceOf(p), p, catalogs.Lookup.BundleFor(p)))
+            .Select(p => Resolved(NamespaceOf(p), p, catalogs.Lookup.BundleFor(p)))
             .OrderBy(r => r.Namespace, StringComparer.Ordinal)
             .ThenBy(r => r.Path, StringComparer.Ordinal)
             .ToList();
@@ -205,6 +216,20 @@ public sealed class WeaponResolver(BundleSet bundles, GameCatalogs catalogs)
             .Select(e => e.Key)
             .Where(p => p != prefabPath && Names(p, record.Slug))
             .ToList();
+    }
+
+    /// A related path, with the object behind it when that object is one this tool writes back.
+    ///
+    /// Asked for every related path of every item that gets selected, which is why it goes through
+    /// the bundle's own table rather than looking for the name: 1.6ms a weapon, and the classes it
+    /// answers are what tells an icon from a skin definition.
+    private RelatedAsset Resolved(string space, string path, string? bundle)
+    {
+        if (bundle is null) return new RelatedAsset(space, path, null);
+
+        var asset = _contents.Locate(bundle, path);
+        return new RelatedAsset(
+            space, path, bundle, asset is not null && Pack.Replaceable.Supports(asset.Class) ? asset : null);
     }
 
     /// Whether a path is about this item rather than about one whose id merely starts the same way.

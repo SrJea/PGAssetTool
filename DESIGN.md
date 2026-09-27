@@ -65,6 +65,24 @@ name and class find it instead.
 the object. Every shader in the game has an empty `m_Name`, so anything reading the obvious field
 finds nothing.
 
+### A path out of the lookup table becomes an object through the bundle's own table
+
+The third join gives paths, not objects: `WeaponChatIcons/Weapon25_chaticon` is registered against a
+bundle and nothing more. Every bundle carries an `AssetBundle` object whose `m_Container` is the map
+the game itself loads by — that path, written as the folder it was authored in plus an extension and
+folded to lower case — so `BundleContents` turns one into a path id, and thereby into a class,
+without reading anything else in the bundle.
+
+That is why it is not a search by name. A search reads the name of every object that might match,
+a name is not unique inside a bundle, and it answers whatever else happened to share the name: asked
+for a skin's definition, it came back with a texture called the same thing. Over 60 weapons' 237
+related assets the container table resolved every one, at 1.6ms a weapon against 14ms for the search.
+
+The class is what tells a picture from a piece of configuration, and so what lets the tree keep a
+chat icon and a skin's shop icon when it is filtered to what can be replaced. Before this the whole
+group went, on the strength of their being paths rather than objects — while an extract wrote them
+out and a pack replaced them.
+
 ---
 
 ## What can be written back
