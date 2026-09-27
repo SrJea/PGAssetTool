@@ -31,13 +31,14 @@ public static class Workspace
                 AlphaIsMask = asset.AlphaIsMask,
 
                 // Named by file rather than by address, because that is what the editor has in
-                // front of it. A texture the mesh wears and the export did not write — the base
-                // weapon's, in a workspace made from one of its skins — is simply not listed.
+                // front of it. One entry per submesh, in the renderer's own order, because that is
+                // what decides which picture goes on which part — the editor dresses the model
+                // from this. A texture the mesh wears and the export did not write — the base
+                // weapon's, in a workspace made from one of its skins — keeps its place as an
+                // empty entry rather than closing the gap and moving every picture after it.
                 Wears = (asset.Wears ?? [])
                     .Select(t => kept.FirstOrDefault(k => Same(k.Address, t)))
-                    .Where(k => k is not null)
-                    .Select(k => Relative(directory, k!.Path))
-                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .Select(k => k is null ? "" : Relative(directory, k.Path))
                     .ToList(),
             });
         }

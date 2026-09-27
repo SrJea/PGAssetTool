@@ -950,6 +950,7 @@ internal static class SelfTest
             Core.Pack.Workspace.Save(written, Core.Pack.Workspace.Read(written) with { Protect = null });
 
             if (TheEditorPutsTheModelInItsPaint(model) is { } paintProblem) return Fail(paintProblem);
+            if (OneMeshCanWearTwoPictures(model, model.WorkspaceRoot) is { } twoPaints) return Fail(twoPaints);
 
             var texture = model.Editor.Files.FirstOrDefault(f => f.Name.EndsWith(".png"));
             if (texture is null) return Fail("no texture in the extracted workspace");
@@ -2595,6 +2596,94 @@ internal static class SelfTest
         }
     }
 
+    /// A model whose one mesh wears two pictures wears both of them in the editor.
+    ///
+    /// #145's mesh is the gun in submesh 0 and its flashlight in submesh 1, painted `mp5Gold_map`
+    /// and `mp5Light_map`. The editor put one picture over the whole model, so the flashlight was
+    /// drawn in the gun's paint — 1,869 of the model's 21,912 drawn pixels, and the author found it
+    /// by looking. Four of the 308 meshes in the first 150 weapons are like this, so it is not the
+    /// common case and not a rare one either.
+    ///
+    /// Its own workspace, extracted and thrown away here, because neither of the weapons this test
+    /// works with has such a mesh and swapping one of them for this would move what everything
+    /// after it is about.
+    private static string? OneMeshCanWearTwoPictures(MainViewModel model, string root)
+    {
+        const int weapon = 145;
+        var was = model.Editor.SelectedWorkspace?.Directory;
+
+        if (!Select(model, weapon)) return $"#{weapon} could not be selected";
+
+        model.ExtractWeaponCommand.Execute(null);
+        WaitWhile(() => model.Busy, 120_000);
+        if (model.LastExport is not { } directory || !Directory.Exists(directory))
+            return $"extracting #{weapon} wrote nothing: {model.Status}";
+
+        try
+        {
+            model.Editor.Rescan(root);
+            if (model.Editor.Workspaces.FirstOrDefault(w => w.Directory == directory) is not { } opened)
+                return $"the workspace extracted for #{weapon} did not appear in the editor";
+
+            model.Editor.SelectedWorkspace = opened;
+
+            // The one with two submeshes. The arms are a mesh of this workspace too and wear one
+            // picture, like almost everything else.
+            var meshes = model.Editor.Files
+                .Where(f => f.Name.EndsWith(".glb", StringComparison.OrdinalIgnoreCase))
+                .ToList();
+
+            foreach (var mesh in meshes)
+            {
+                model.Editor.SelectedFile = mesh;
+                if (!Shows(model, mesh))
+                    return $"'{mesh.Name}' never loaded in the editor: {model.Editor.Edited.Nothing}";
+
+                if (model.Editor.Edited.Mesh is not { SubMeshes.Count: > 1 }) continue;
+
+                var worn = model.Editor.Edited.MeshTextures;
+                var sizes = worn is null
+                    ? "nothing"
+                    : string.Join(", ", worn.Select(t => t is null ? "-" : $"{t.Width}x{t.Height}"));
+
+                Console.WriteLine($"editor   '{mesh.Name}' has {model.Editor.Edited.Mesh.SubMeshes.Count} "
+                    + $"submeshes and is dressed with {sizes}");
+
+                if (worn is null || worn.Any(t => t is null))
+                    return $"'{mesh.Name}' has a submesh drawn in no picture at all";
+
+                // Two pictures, not the same one twice — compared by their pixels, because two
+                // readings of one file are two objects and the bug being checked for is exactly
+                // one picture read twice. Both sides of the comparison, since both dress the model
+                // and only one of them was ever looked at while this was wrong.
+                if (Alike(worn))
+                    return $"'{mesh.Name}' wears two different pictures in the game and one here";
+
+                var game = model.Editor.Original.MeshTextures;
+                if (game is null || game.Count != worn.Count || game.Any(t => t is null) || Alike(game))
+                    return $"'{mesh.Name}' is dressed with two pictures as edited and not in the game";
+
+                return null;
+            }
+
+            return $"#{weapon} has a mesh with two submeshes and none was found in its workspace";
+        }
+        finally
+        {
+            try { Directory.Delete(directory, recursive: true); } catch (IOException) { }
+            model.Editor.Rescan(root);
+            model.Editor.SelectedWorkspace = was is null
+                ? model.Editor.Workspaces.FirstOrDefault()
+                : model.Editor.Workspaces.FirstOrDefault(w => w.Directory == was);
+        }
+    }
+
+    /// Whether every submesh of a model is drawn in the same picture, by the pixels rather than by
+    /// the objects: reading one file twice makes two of them.
+    private static bool Alike(IReadOnlyList<PreviewImage?> worn)
+        => worn.Count > 1 && worn.Skip(1).All(t =>
+            t is not null && worn[0] is not null && t.Bgra.AsSpan().SequenceEqual(worn[0]!.Bgra));
+
     /// A model opened in the editor comes up wearing its own paint, and says which of the pictures
     /// that is.
     ///
@@ -2622,19 +2711,28 @@ internal static class SelfTest
             var offered = model.Editor.Edited.TextureChoices;
             var lit = offered.Count(c => c.Worn);
             var chosen = model.Editor.Edited.ChosenTexture;
+            var slots = model.Editor.Edited.MeshTextures;
 
             Console.WriteLine($"editor   '{mesh.Name}': {lit} of {Math.Max(offered.Count - 1, 0)} "
-                + $"pictures are its own, wearing '{chosen?.Name ?? "nothing"}'");
+                + $"pictures are its own, on {slots?.Count(t => t is not null) ?? 0} of "
+                + $"{model.Editor.Edited.Mesh?.SubMeshes.Count ?? 0} submesh(es), "
+                + $"list on '{chosen?.Name ?? "nothing"}'");
 
             if (lit == 0) continue;
             dressed++;
 
-            if (chosen is not { Worn: true })
-                return $"'{mesh.Name}' knows which picture it wears and came up wearing "
+            // The list opens on its own paint rather than on one of the pictures, because the model
+            // is already wearing it — submesh by submesh, which is not something one entry in a
+            // list of names can stand for.
+            if (chosen is not { PathId: 0 })
+                return $"'{mesh.Name}' came up dressed and its list says it is wearing "
                     + $"'{chosen?.Name ?? "nothing"}'";
 
-            if (model.Editor.Edited.MeshTextures is not { } on || on.All(t => t is null))
-                return $"'{mesh.Name}' chose '{chosen.Name}' and is still drawn grey";
+            if (slots is not { } on || on.All(t => t is null))
+                return $"'{mesh.Name}' knows which pictures it wears and is still drawn grey";
+
+            if (model.Editor.Edited.Mesh is { SubMeshes.Count: > 1 } several && on.Count != several.SubMeshes.Count)
+                return $"'{mesh.Name}' has {several.SubMeshes.Count} submeshes and was dressed with {on.Count}";
 
             // Marked and listed first, both: an order only says something once the whole list has
             // been read, and the mark says it at a glance.

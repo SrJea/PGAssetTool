@@ -191,6 +191,17 @@ So the answer is written down at the one moment that knows it. Where several acc
 the export keeps the one whose textures it actually wrote out. Asking the game is still the fallback
 for a workspace that says nothing.
 
+It is written **per submesh, in the renderer's own order**, with an empty entry where the picture
+that submesh wears was not written here. A submesh is what decides which material draws a triangle:
+140 of the game's 3,245 item meshes wear more than one picture, and #145's single mesh is the gun in
+submesh 0 and its flashlight in submesh 1, painted `mp5Gold_map` and `mp5Light_map`. Recorded as the
+set of names that happened to be here — which it was — it said which pictures a model wears and not
+which part wears which, so the editor put one of them over the whole model and drew the flashlight
+in the gun's paint.
+
+Putting one picture over the whole model is still what the texture list in the editor does, and that
+is the other question: what this geometry looks like in some other paint, which is what a skin is.
+
 ### A weapon's paint reaches its default skin
 
 A weapon with skins has two default looks, and which one a player gets depends on their own history:
