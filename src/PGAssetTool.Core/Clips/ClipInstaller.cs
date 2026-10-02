@@ -1,3 +1,4 @@
+using AssetsTools.NET;
 using AssetsTools.NET.Extra;
 using PGAssetTool.Core.Game;
 using PGAssetTool.Core.Mods;
@@ -10,6 +11,20 @@ public sealed record ClipAddress(string Bundle, long PathId, string Name, float 
 
 /// What one clip became.
 public sealed record ClipRetimed(string Bundle, string Name, float Was, float Now);
+
+/// One clip to be replaced by another weapon's.
+/// <param name="Root">
+/// What the object carrying the target's own animation is called. A clip names what it moves from
+/// that object downwards — `mp5/FPS_PLAYER_Arm_Right/joint_root` — and the first name is the one
+/// thing two weapons' rigs never share, so it is the one thing rewritten. Everything below it has
+/// to match, and whether it does is the caller's to check and the author's to judge.
+/// </param>
+public sealed record ClipMove(ClipAddress Into, ClipAddress From, string Root);
+
+/// What one transplant did. `Paths` is every object the clip now drives, for a caller that wants to
+/// say which of them the target's own rig has never heard of.
+public sealed record ClipMoved(
+    string Bundle, string Name, float Was, float Now, string From, IReadOnlyList<string> Paths);
 
 /// Rewrites the timing of animation clips in the game's own bundles, and puts them back.
 ///
@@ -117,6 +132,110 @@ public sealed class ClipInstaller(GameInstallation game, ModStore store)
         }
 
         return done;
+    }
+
+    /// Puts another weapon's motion onto these clips, at the length they already have.
+    ///
+    /// The whole object's contents are moved rather than its curves rebuilt, which is safe here and
+    /// would not be in another engine: read across 318 of the game's clips, not one holds a pointer
+    /// to anything, and none carries a binding constant. A clip is self-contained data, so it
+    /// travels between two files as it stands.
+    ///
+    /// Three things are changed on the way. The curve paths get the target's own root name, since
+    /// that first name is the one thing two weapons never share. The times are scaled so the clip
+    /// lasts exactly what the target's own clip lasted — this is the point of the whole exercise,
+    /// because the author halved a Machine Gun's clips and watched its rate of fire hit the game's
+    /// cap. And the name is put back, because a clip is what the Animation component asks for by
+    /// name as well as by pointer.
+    public IReadOnlyList<ClipMoved> Transplant(
+        IReadOnlyList<ClipMove> moves, BundlePacking packing = BundlePacking.Smaller)
+    {
+        Refuse();
+        var done = new List<ClipMoved>();
+
+        foreach (var group in moves.GroupBy(m => m.Into.Bundle, StringComparer.OrdinalIgnoreCase))
+        {
+            var (cache, path, hash) = Live(group.Key);
+
+            if (!store.HasBackup(cache, group.Key, hash) && !BundleIntegrity.IsPristine(path, hash))
+                throw new InvalidOperationException(
+                    $"'{group.Key}' has already been modified by something else and there is no backup "
+                    + "of it. Verify the game's files before writing a clip into it.");
+
+            store.Backup(cache, group.Key, hash, path);
+            var original = store.OriginalOf(cache, group.Key, hash) ?? path;
+
+            var written = path + ".pgat-clips";
+            using (var editor = new BundleEditor(original))
+            {
+                foreach (var move in group)
+                {
+                    var into = editor.File.file.GetAssetInfo(move.Into.PathId);
+                    if (into is null || into.TypeId != (int)AssetClassID.AnimationClip) continue;
+
+                    // The source read as the game shipped it, so that moving a motion twice starts
+                    // from the same place each time.
+                    var (fromCache, fromLive, fromHash) = Live(move.From.Bundle);
+                    var fromPath = store.OriginalOf(fromCache, move.From.Bundle, fromHash) ?? fromLive;
+
+                    AssetTypeValueField? source;
+                    using (var reading = new BundleEditor(fromPath))
+                    {
+                        var fromInfo = reading.File.file.GetAssetInfo(move.From.PathId);
+                        source = fromInfo is null ? null : reading.Read(fromInfo);
+                    }
+                    if (source is null) continue;
+
+                    var was = move.Into.Length;
+                    var length = Motion.Read(source)?.Length ?? 0f;
+                    var paths = Rebind(source, move.Root);
+
+                    if (length > 0 && was > 0) ClipTiming.Stretch(source, was / length);
+                    if (!source["m_Name"].IsDummy) source["m_Name"].AsString = move.Into.Name;
+
+                    editor.Stage(into, source);
+                    done.Add(new ClipMoved(
+                        group.Key, move.Into.Name, was, Motion.Read(source)?.Length ?? was,
+                        $"{move.From.Name} of {move.From.Bundle}", paths));
+                }
+
+                editor.Save(written, packing);
+            }
+
+            File.Move(written, path, overwrite: true);
+        }
+
+        return done;
+    }
+
+    /// Hangs every curve in a clip off a different root object, and answers what it now drives.
+    ///
+    /// Only the first name changes. A curve on the root object itself names no path at all and
+    /// keeps naming none.
+    private static IReadOnlyList<string> Rebind(AssetTypeValueField clip, string root)
+    {
+        var driving = new List<string>();
+
+        foreach (var name in new[] { "m_PositionCurves", "m_RotationCurves", "m_ScaleCurves" })
+        {
+            var array = clip[name];
+            if (array.IsDummy) continue;
+
+            foreach (var bound in array["Array"].Children)
+            {
+                var path = bound["path"];
+                if (path.IsDummy) continue;
+
+                var was = path.AsString;
+                var slash = was.IndexOf('/');
+                var now = was.Length == 0 ? was : slash < 0 ? root : root + was[slash..];
+
+                path.AsString = now;
+                if (!driving.Contains(now, StringComparer.Ordinal)) driving.Add(now);
+            }
+        }
+
+        return driving;
     }
 
     /// Puts these bundles back as they shipped. Answers the ones there was something to put back for.

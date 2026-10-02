@@ -35,11 +35,17 @@ if (command is "-h" or "--help" or "help")
                                and its prefab number are different sequences.
 
           clips <item>         List an item's animation clips and how long each one lasts.
-                               --stretch <factor> changes those lengths in the game's own bundle —
-                               0.5 halves them — and --restore puts the bundle back. This is not a
-                               .pgmod and leaves no entry in the ledger: a clip's length looks like
-                               something the game reads as the rate of fire, so it is a deliberate
-                               act to be done on a copy of the game. --clip <name> picks one.
+                               --from <item> puts another weapon's motion on them, clip by clip of
+                               the same name, each kept at the length it already had. --dry-run
+                               says what that would do without doing it, which is worth reading
+                               first: it names the parts the borrowed motion would drive and the
+                               ones it would stop driving.
+                               --stretch <factor> changes the lengths instead — 0.5 halves them —
+                               which the game reads as the rate of fire, so that one is for finding
+                               things out on a copy of the game rather than for playing with.
+                               Neither is a .pgmod and neither leaves an entry in the ledger; the
+                               bundle is backed up first and --restore puts it back. --clip <name>
+                               does one clip rather than all of them.
 
           extract <item>       Write out what can be changed of an item: images as PNG, audio as
                                WAV or Ogg, meshes as glTF. With --workspace, also writes a
@@ -431,17 +437,41 @@ var tree = new WeaponResolver(bundles, catalogs).Resolve(record);
 
 if (command == "clips")
 {
-    var found = tree.PrefabAssets
-        .Where(a => a.Class == AssetClassID.AnimationClip)
-        .Select(a =>
+    // Each clip, what it drives, and what it lasts. Read here, while the reader is still up.
+    (List<ClipAddress> Clips, string Root, HashSet<string> Drives) ClipsOf(WeaponTree of)
+    {
+        var addresses = new List<ClipAddress>();
+        var root = "";
+        var drives = new HashSet<string>(StringComparer.Ordinal);
+
+        foreach (var asset in of.PrefabAssets.Where(a => a.Class == AssetClassID.AnimationClip))
         {
-            var bundle = a.Bundle.Length > 0 ? a.Bundle : tree.PrefabBundle!;
+            var bundle = asset.Bundle.Length > 0 ? asset.Bundle : of.PrefabBundle!;
             var file = bundles.Open(bundle);
-            var info = file.file.GetAssetInfo(a.PathId);
+            var info = file.file.GetAssetInfo(asset.PathId);
             var field = info is null ? null : bundles.Context.Deserialize(file, info);
             var motion = field is null ? null : Motion.Read(field);
-            return new ClipAddress(bundle, a.PathId, a.Name, motion?.Length ?? 0f);
-        })
+
+            addresses.Add(new ClipAddress(bundle, asset.PathId, asset.Name, motion?.Length ?? 0f));
+
+            if (motion is null) continue;
+            foreach (var curve in motion.Curves) drives.Add(curve.Path);
+
+            // What this weapon's own curves hang from, which is what another weapon's motion has to
+            // be hung from to drive anything here.
+            if (root.Length == 0)
+                root = motion.Curves
+                    .Select(c => c.Path)
+                    .Where(p => p.Contains('/'))
+                    .Select(p => p[..p.IndexOf('/')])
+                    .FirstOrDefault() ?? "";
+        }
+
+        return (addresses, root, drives);
+    }
+
+    var (all, ownRoot, ownPaths) = ClipsOf(tree);
+    var found = all
         .Where(c => Option("clip") is not { } only
             || string.Equals(c.Name, only, StringComparison.OrdinalIgnoreCase))
         .ToList();
@@ -450,6 +480,70 @@ if (command == "clips")
     {
         Console.Error.WriteLine($"#{record.GameNumber} {tree.DisplayName} has no such clip.");
         return 1;
+    }
+
+    // The other weapon's motion, when one was named. Resolved before the reader goes down.
+    List<ClipMove> moves = [];
+    IReadOnlySet<string> drives = new HashSet<string>(StringComparer.Ordinal);
+    if (Option("from") is { } donor)
+    {
+        if (catalogs.Find(donor) is not { } other)
+        {
+            Console.Error.WriteLine($"Nothing matches '{donor}'.");
+            return 1;
+        }
+
+        var (theirs, _, theirPaths) = ClipsOf(new WeaponResolver(bundles, catalogs).Resolve(other));
+        moves = found
+            .Select(mine => (Mine: mine, Theirs: theirs.FirstOrDefault(t =>
+                string.Equals(t.Name, mine.Name, StringComparison.OrdinalIgnoreCase))))
+            .Where(pair => pair.Theirs is not null)
+            .Select(pair => new ClipMove(pair.Mine, pair.Theirs!, ownRoot))
+            .ToList();
+
+        // What this weapon's own clips drive, so that an object a borrowed motion names and this
+        // rig has never heard of is said out loud rather than silently animating nothing.
+        drives = ownPaths;
+
+        Console.WriteLine($"#{record.GameNumber}  {tree.DisplayName}   <- "
+            + $"#{other.GameNumber} {catalogs.Localization.Translate(other.LocalizationKey) ?? other.Slug}");
+        foreach (var pair in found.Where(f => moves.All(m => m.Into.Name != f.Name)))
+            Console.WriteLine($"  {pair.Name,-12} left alone: the other weapon has no clip of that name");
+
+        // Looking before writing. The plan is worth seeing on its own: whether the two rigs line up
+        // is the question that decides whether a borrowed motion will show anything, and the answer
+        // is a list of names that can be read in a second.
+        if (args.Contains("--dry-run"))
+        {
+            // What the other weapon's curves would be hung from here.
+            string Rebound(string path) => path.Length == 0 ? path
+                : path.Contains('/') ? ownRoot + path[path.IndexOf('/')..]
+                : ownRoot;
+
+            foreach (var move in moves)
+                Console.WriteLine($"  {move.Into.Name,-12} {move.Into.Length,7:F3}s would keep its length"
+                    + (Math.Abs(move.Into.Length - move.From.Length) > 0.001f
+                        ? $", the motion being stretched from {move.From.Length:F3}s"
+                        : ", which is what the motion already lasts"));
+
+            // A curve on the root object itself names no path and is not an object to look for.
+            var borrowed = theirPaths
+                .Select(Rebound)
+                .Where(p => p.Length > 0)
+                .Distinct(StringComparer.Ordinal)
+                .ToList();
+            var strangers = borrowed.Where(p => p.Length > 0 && !ownPaths.Contains(p)).ToList();
+
+            Console.WriteLine($"\n  {borrowed.Count - strangers.Count} of {borrowed.Count} objects it "
+                + $"animates are in this weapon's own rig, under '{ownRoot}'");
+            foreach (var path in strangers)
+                Console.WriteLine($"    nothing here is called '{path}', so that curve would drive nothing");
+            foreach (var path in ownPaths.Where(p => p.Length > 0 && !borrowed.Contains(p, StringComparer.Ordinal)))
+                Console.WriteLine($"    '{path}' is animated now and would stop being");
+
+            Console.WriteLine("\n  Nothing was written. Run it again without --dry-run to do it.");
+            return 0;
+        }
     }
 
     var stretch = Option("stretch");
@@ -462,9 +556,32 @@ if (command == "clips")
     var installer = new ClipInstaller(game, new ModStore(game));
     try
     {
-        Console.WriteLine($"#{record.GameNumber}  {tree.DisplayName}");
+        if (moves.Count == 0) Console.WriteLine($"#{record.GameNumber}  {tree.DisplayName}");
         foreach (var clip in installer.Read(found))
             Console.WriteLine($"  {clip.Name,-12} {clip.Length,7:F3}s  @ {clip.Bundle}");
+
+        if (moves.Count > 0)
+        {
+            Console.WriteLine();
+            var unknown = new List<string>();
+            foreach (var done in installer.Transplant(
+                         moves, args.Contains("--fast") ? BundlePacking.Faster : BundlePacking.Smaller))
+            {
+                Console.WriteLine($"  {done.Name,-12} {done.Now,7:F3}s  <- {done.From}"
+                    + (Math.Abs(done.Now - done.Was) > 0.001f ? $"  (was {done.Was:F3}s)" : " (same length)"));
+                unknown.AddRange(done.Paths.Where(p => p.Length > 0 && !drives.Contains(p)));
+            }
+
+            // Said rather than refused. Whether a part this weapon has not got matters is something
+            // the author can see in the preview and nothing here can judge.
+            foreach (var path in unknown.Distinct(StringComparer.Ordinal))
+                Console.WriteLine($"    nothing here is called '{path}', so that curve drives nothing");
+
+            Console.WriteLine("\n  Each clip kept the length it already had: the game appears to read "
+                + "that as the rate of\n  fire. This changes the game's own bundle and is not a .pgmod; "
+                + "`--restore` puts it back.");
+            return 0;
+        }
 
         if (stretch is null && !args.Contains("--restore")) return 0;
         if (args.Contains("--restore"))
