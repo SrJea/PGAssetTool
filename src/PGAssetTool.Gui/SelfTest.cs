@@ -951,6 +951,7 @@ internal static class SelfTest
 
             if (TheEditorPutsTheModelInItsPaint(model) is { } paintProblem) return Fail(paintProblem);
             if (OneMeshCanWearTwoPictures(model, model.WorkspaceRoot) is { } twoPaints) return Fail(twoPaints);
+            if (AnItemIsTheObjectTheGameLoads(model) is { } loadedProblem) return Fail(loadedProblem);
             if (AnotherKindGoesTheWholeWay(model, model.WorkspaceRoot) is { } otherKind) return Fail(otherKind);
 
             var texture = model.Editor.Files.FirstOrDefault(f => f.Name.EndsWith(".png"));
@@ -2607,6 +2608,58 @@ internal static class SelfTest
         finally
         {
             Directory.Delete(temp, recursive: true);
+        }
+    }
+
+    /// An item is the object the game loads for its path, not the first one of that name.
+    ///
+    /// A name is not unique inside a bundle. Every one of the 50 pets that looked as though it
+    /// carried no model has two objects of its own name in its own bundle: the real one under
+    /// `Pets/Content/<id>` and an empty one under `Pets/Infos/<id>`. Searching by name took
+    /// whichever came first, so half the pets opened as four objects and no geometry — and three
+    /// weapons were quietly short of a mesh for the same reason.
+    ///
+    /// Checked on a pet rather than on a weapon because that is where it shows, and by name as well
+    /// as by count: the empty object is not merely smaller, it is a different object, and a check
+    /// that only counted could be satisfied by the wrong one growing.
+    private static string? AnItemIsTheObjectTheGameLoads(MainViewModel model)
+    {
+        const string slug = "pet_wolf";
+        var kind = Core.Catalog.ItemKinds.Pet;
+        var was = model.Kind;
+
+        try
+        {
+            if (!model.Kinds.Contains(kind)) return $"the window does not offer {kind.Name}";
+            if (!Select(model, kind, slug)) return $"'{slug}' could not be selected as a {kind.Name}";
+            if (model.Detail is not { } detail) return $"'{slug}' was selected and nothing was shown";
+
+            var tree = detail.Tree;
+            Console.WriteLine($"loaded   '{slug}': {tree.PrefabAssets.Count} objects in "
+                + $"{tree.PrefabBundle ?? "no bundle"}, model {tree.MainMesh?.Name ?? "none"}");
+
+            if (tree.MainMesh is null)
+                return $"'{slug}' resolved {tree.PrefabAssets.Count} objects and no model, which is the "
+                    + "empty one of the two objects of that name";
+            if (tree.MainMesh.Name != $"{slug}_mesh")
+                return $"'{slug}' resolved a model called '{tree.MainMesh.Name}'";
+
+            // And it is drawn, which is the whole point of resolving the right object.
+            if (detail.SelectedNode is not { Class: AssetClassID.Mesh } opened)
+                return $"'{slug}' did not open on its model";
+            if (!Arrived(model, opened)) return $"'{opened.Label}' never reached the preview";
+            if (model.Preview.Nothing is { } why) return $"'{opened.Label}': {why}";
+
+            Console.WriteLine($"loaded   preview {model.Preview.Caption}");
+            return null;
+        }
+        finally
+        {
+            if (model.Kind != was)
+            {
+                model.Kind = was;
+                WaitWhile(() => model.Weapons.Count == 0, 60_000);
+            }
         }
     }
 

@@ -146,13 +146,27 @@ public sealed class WeaponResolver(BundleSet bundles, GameCatalogs catalogs)
         {
             var file = bundles.Open(prefabBundle);
 
-            // By the leaf of the path the lookup table actually matched, and without minding case.
-            // The registry's id and the prefab's own name are the same string for a weapon and only
-            // nearly for everything else: `BerserkBoots_Up1` is filed as `BerserkBoots_up1`, which
-            // the lookup finds and an exact search for the id does not.
+            // The object the game itself loads under that path, out of the bundle's own table of
+            // what it holds. A search by name was what this did, and a name is not unique inside a
+            // bundle: every one of the 50 pets that appeared to carry no model has *two* objects
+            // called `pet_wolf` in `pt_pet_wolf` — the 172-object one with `pet_wolf_mesh` under
+            // `Pets/Content/pet_wolf`, and an empty 4-object one under `Pets/Infos/pet_wolf` — and
+            // the search took whichever came first. All 50 find their model this way, and so do
+            // three weapons that were quietly short of one: #extracting_ray_pistol reached two
+            // meshes where the game's own answer reaches four.
+            //
+            // Measured over all 2,624 items before changing it: the two answers agree for 2,466,
+            // the table names a GameObject for every single one, and of the 158 that differ, 69
+            // gain a model, 88 reach the same meshes by another copy of the same object, and one —
+            // royale_car_monster_truck — reaches seven meshes where the name found ten. That one
+            // goes to the table as well: it is what the game loads for that path, and the name is
+            // a guess that happened to land on a fuller object.
             var named = prefabPath[(prefabPath.LastIndexOf('/') + 1)..];
-            var root = ReferenceWalker.FindByName(
-                bundles.Context, file, AssetClassID.GameObject, named, StringComparison.OrdinalIgnoreCase);
+            var root = _contents.Locate(prefabBundle, prefabPath) is { Class: AssetClassID.GameObject } loaded
+                ? file.file.GetAssetInfo(loaded.PathId)
+                // Only when the table names none, which nothing in this version of the game does.
+                : ReferenceWalker.FindByName(
+                    bundles.Context, file, AssetClassID.GameObject, named, StringComparison.OrdinalIgnoreCase);
 
             if (root is null)
                 unresolved.Add($"'{named}' was not found inside bundle '{prefabBundle}'");
