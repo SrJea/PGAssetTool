@@ -97,6 +97,19 @@ public sealed record UnityMesh
     /// Worked out on every ask rather than kept: it is one pass over the triangles and a handful of
     /// multiplications, which is nothing beside the rasterizing it decides, and a cached answer in a
     /// record is a field that quietly joins its equality.
+    /// **A shell can also be one submesh of the model rather than the whole of it**, and then the
+    /// sum above is drowned: Turbo Cat's 504-triangle shell comes to -435 and its 752-triangle body
+    /// to +579, so the mesh as a whole leans outwards by +145 and the shell was drawn as a surface
+    /// over the cat. So each submesh is weighed on its own as well.
+    ///
+    /// A submesh leaning inwards is not enough by itself — 58 of the game's items have one, and
+    /// most are the inside of a barrel or the back face of a sight, a few triangles each. What
+    /// tells a shell from one of those is that **a shell wraps the whole model**: its bounding box
+    /// fills the model's in all three directions. Measured over every item: of those 58, exactly
+    /// two fill nine tenths of the model — Turbo Cat at 0.98 and the salesman avatar at 1.00 — and
+    /// the next one down fills 0.89 while leaning inwards by only -0.013, a twentieth of Turbo
+    /// Cat's -0.204. Both margins are wide and on different axes, so both are required. No weapon
+    /// is caught, which is what the author's own eyes said of them.
     public bool CarriesAnOutline
     {
         get
@@ -138,8 +151,61 @@ public sealed record UnityMesh
                 if (wx * nx + wy * ny + wz * nz >= 0) agree++;
             }
 
-            return all > 0 && agree >= all * 0.9f && lean < 0;
+            if (all == 0 || agree < all * 0.9f) return false;
+            return lean < 0 || SubMeshes.Count > 1 && SubMeshes.Any(part => Wraps(positions, normals, part));
         }
+    }
+
+    /// Whether one submesh is a shell around the whole model: leaning inwards, and filling the
+    /// model's own box in all three directions. See CarriesAnOutline for the measurements.
+    private bool Wraps(float[] positions, float[] normals, SubMesh part)
+    {
+        var whole = MeshBounds.Of(this, positions);
+        var (wx, wy, wz) = whole.Size;
+        if (wx <= 0 || wy <= 0 || wz <= 0) return false;
+
+        var lean = 0f;
+        var triangles = 0;
+        var radius = 0f;
+        var (lowX, lowY, lowZ) = (float.MaxValue, float.MaxValue, float.MaxValue);
+        var (highX, highY, highZ) = (float.MinValue, float.MinValue, float.MinValue);
+
+        var to = Math.Min(part.IndexStart + part.IndexCount, Indices.Length);
+        for (var i = Math.Max(part.IndexStart, 0); i + 2 < to; i += 3)
+        {
+            var (a, b, c) = (Indices[i], Indices[i + 1], Indices[i + 2]);
+            if (a < 0 || b < 0 || c < 0) continue;
+            if (a >= VertexCount || b >= VertexCount || c >= VertexCount) continue;
+
+            var nx = normals[a * 3] + normals[b * 3] + normals[c * 3];
+            var ny = normals[a * 3 + 1] + normals[b * 3 + 1] + normals[c * 3 + 1];
+            var nz = normals[a * 3 + 2] + normals[b * 3 + 2] + normals[c * 3 + 2];
+
+            lean += (Middle(positions, a, b, c, 0) - whole.Centre.X) * nx
+                + (Middle(positions, a, b, c, 1) - whole.Centre.Y) * ny
+                + (Middle(positions, a, b, c, 2) - whole.Centre.Z) * nz;
+            triangles++;
+
+            foreach (var vertex in stackalloc[] { a, b, c })
+            {
+                var (x, y, z) = (positions[vertex * 3], positions[vertex * 3 + 1], positions[vertex * 3 + 2]);
+                (lowX, lowY, lowZ) = (MathF.Min(lowX, x), MathF.Min(lowY, y), MathF.Min(lowZ, z));
+                (highX, highY, highZ) = (MathF.Max(highX, x), MathF.Max(highY, y), MathF.Max(highZ, z));
+
+                var (dx, dy, dz) = (x - whole.Centre.X, y - whole.Centre.Y, z - whole.Centre.Z);
+                radius = MathF.Max(radius, MathF.Sqrt(dx * dx + dy * dy + dz * dz));
+            }
+        }
+
+        if (triangles == 0 || radius <= 0) return false;
+
+        // Against what a surface of this many triangles facing straight out would come to, so that
+        // a cat and a pistol are the same question.
+        if (lean / (triangles * 3f * radius) > -0.05f) return false;
+
+        var fills = MathF.Min(
+            MathF.Min((highX - lowX) / wx, (highY - lowY) / wy), (highZ - lowZ) / wz);
+        return fills >= 0.9f;
     }
 
     private static float Middle(float[] positions, int a, int b, int c, int axis)

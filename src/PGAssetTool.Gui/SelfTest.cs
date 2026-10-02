@@ -952,6 +952,7 @@ internal static class SelfTest
             if (TheEditorPutsTheModelInItsPaint(model) is { } paintProblem) return Fail(paintProblem);
             if (OneMeshCanWearTwoPictures(model, model.WorkspaceRoot) is { } twoPaints) return Fail(twoPaints);
             if (AnItemIsTheObjectTheGameLoads(model) is { } loadedProblem) return Fail(loadedProblem);
+            if (AnOutlineIsLeftOutWhicheverShapeItTakes(model) is { } shellProblem) return Fail(shellProblem);
             if (AnotherKindGoesTheWholeWay(model, model.WorkspaceRoot) is { } otherKind) return Fail(otherKind);
 
             var texture = model.Editor.Files.FirstOrDefault(f => f.Name.EndsWith(".png"));
@@ -2608,6 +2609,58 @@ internal static class SelfTest
         finally
         {
             Directory.Delete(temp, recursive: true);
+        }
+    }
+
+    /// An outline shell is left out whether it is the whole mesh or one submesh of it.
+    ///
+    /// Turbo Cat is drawn in the game the way the game draws anything cel-shaded: a copy of itself,
+    /// a little larger and inside out, shown as a silhouette. That copy is submesh 0 of its one
+    /// mesh, and the test for it was a sum over the whole mesh — where the 752-triangle body's +579
+    /// buried the 504-triangle shell's -435, so the shell came out as a surface over the cat.
+    ///
+    /// Checked on three models, because the danger here is the opposite one. 58 items have a
+    /// submesh that leans inwards and almost all of them are a barrel's inside or a sight's back
+    /// face — parts that must go on being drawn. `gorgon_head` is the closest of those by lean
+    /// (-0.206 against Turbo Cat's -0.204) and has to stay unshelled; it is told apart by filling
+    /// a twentieth of the model where a shell fills all of it.
+    private static string? AnOutlineIsLeftOutWhicheverShapeItTakes(MainViewModel model)
+    {
+        var was = model.Kind;
+
+        Core.Export.Meshes.UnityMesh? Shown(Core.Catalog.ItemKind kind, string slug)
+        {
+            if (!Select(model, kind, slug)) return null;
+            if (model.Detail is not { } detail) return null;
+            if (detail.SelectedNode is not { Class: AssetClassID.Mesh } opened) return null;
+            return Arrived(model, opened) ? model.Preview.Rest : null;
+        }
+
+        try
+        {
+            var cat = Shown(Core.Catalog.ItemKinds.Pet, "pet_turbo_cat");
+            if (cat is null) return "'pet_turbo_cat' never reached the preview";
+
+            var gorgon = Shown(Core.Catalog.ItemKinds.Weapon, "gorgon_head");
+            if (gorgon is null) return "'gorgon_head' never reached the preview";
+
+            Console.WriteLine($"outline  'pet_turbo_cat' {cat.SubMeshes.Count} submeshes, shelled {cat.CarriesAnOutline}; "
+                + $"'gorgon_head' {gorgon.SubMeshes.Count} submeshes, shelled {gorgon.CarriesAnOutline}");
+
+            if (!cat.CarriesAnOutline)
+                return "'pet_turbo_cat' carries an outline as one of its submeshes and is drawn as though it does not";
+            if (gorgon.CarriesAnOutline)
+                return "'gorgon_head' has an inward-leaning part that is not a shell, and is being treated as one";
+
+            return null;
+        }
+        finally
+        {
+            if (model.Kind != was)
+            {
+                model.Kind = was;
+                WaitWhile(() => model.Weapons.Count == 0, 60_000);
+            }
         }
     }
 
