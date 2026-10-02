@@ -83,6 +83,15 @@ chat icon and a skin's shop icon when it is filtered to what can be replaced. Be
 group went, on the strength of their being paths rather than objects — while an extract wrote them
 out and a pack replaced them.
 
+**An item's own prefab is found the same way**, and for the same reason. It used to be found by the
+leaf of the path that matched, and a name is not unique inside a bundle: 158 of the game's 2,624
+items have more than one object of their own name, and for 69 of them the search landed on one with
+no model. Every pet that appeared to be an empty stub was this — `pt_pet_wolf` holds the real
+`pet_wolf` under `Pets/Content/pet_wolf` and an empty one under `Pets/Infos/pet_wolf` — along with
+three weapons that were quietly short of a mesh. Of the 158 where the two answers differ, 69 gain a
+model, 88 reach the same meshes through another copy of the same object, and one reaches fewer; the
+table wins there too, because it is what the game loads and the name was a guess.
+
 ---
 
 ## What can be written back

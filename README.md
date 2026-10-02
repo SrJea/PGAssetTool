@@ -27,7 +27,7 @@ Everything to do with the game's assets, made simple.
 | Boots | ⚠️ | Not recommended, not supported — now in the window as well as the CLI |
 | Gliders | ⚠️ | Not recommended, not supported — now in the window as well as the CLI |
 | Transports | ⚠️ | Not recommended, not supported — now in the window as well as the CLI |
-| Pets | ⚠️ | Not recommended, not supported — now in the window as well as the CLI. About half of them carry no model of their own: it belongs to the pet their registry entry names, which the tool does not follow yet |
+| Pets | ⚠️ | Not recommended, not supported — now in the window as well as the CLI |
 | Gadgets | ❌️ | Planned |
 | Buttons and other UI | ❌️ | Planned |
 | Hat skins | ❌️ | Planned |
