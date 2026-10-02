@@ -2,6 +2,8 @@ using System.Diagnostics;
 using System.Text;
 using AssetsTools.NET.Extra;
 using PGAssetTool.Cli;
+using PGAssetTool.Core.Clips;
+using PGAssetTool.Core.Preview;
 using PGAssetTool.Core.Assets;
 using PGAssetTool.Core.Catalog;
 using PGAssetTool.Core.Export;
@@ -31,6 +33,13 @@ if (command is "-h" or "--help" or "help")
                                in-game number (819), a prefab name (Weapon1257) or a slug; anything
                                else takes the id `items` lists. Note that a weapon's in-game number
                                and its prefab number are different sequences.
+
+          clips <item>         List an item's animation clips and how long each one lasts.
+                               --stretch <factor> changes those lengths in the game's own bundle —
+                               0.5 halves them — and --restore puts the bundle back. This is not a
+                               .pgmod and leaves no entry in the ledger: a clip's length looks like
+                               something the game reads as the rate of fire, so it is a deliberate
+                               act to be done on a copy of the game. --clip <name> picks one.
 
           extract <item>       Write out what can be changed of an item: images as PNG, audio as
                                WAV or Ogg, meshes as glTF. With --workspace, also writes a
@@ -230,7 +239,7 @@ if (command == "verify")
 {
     var store = new ModStore(game);
     var expected = store.Read().SelectMany(m => m.TouchedBundles.Keys).ToHashSet(StringComparer.OrdinalIgnoreCase);
-    var modified = new List<(string Bundle, bool Known)>();
+    var modified = new List<(string Bundle, bool Known, bool Kept)>();
     var missing = 0;
 
     var fromDownloaded = 0;
@@ -239,18 +248,27 @@ if (command == "verify")
         if (game.Resolve(entry.Name, entry.Hash) is not { } resolved) { missing++; continue; }
         if (resolved.Cache == CacheKind.Downloaded) fromDownloaded++;
         if (!BundleIntegrity.IsPristine(resolved.Path, entry.Hash))
-            modified.Add((entry.Name, expected.Contains(entry.Name)));
+            // Whether the original is kept is asked of the backups rather than read off the ledger.
+            // Not everything that writes to a bundle leaves a ledger entry — retiming a clip does
+            // not, and neither does replacing the interface font — and those do back the bundle up.
+            // Told by the ledger alone, this said "no backup here" about a bundle whose original was
+            // sitting in the backup folder, and sent the author to Steam to repair nothing.
+            modified.Add((entry.Name, expected.Contains(entry.Name),
+                store.HasBackup(resolved.Cache, entry.Name, entry.Hash)));
     }
     if (fromDownloaded > 0)
         Console.WriteLine($"{fromDownloaded} bundle(s) load from the downloaded cache rather than the shipped one.");
 
     Console.WriteLine($"{modified.Count} bundle(s) differ from the hash the game recorded for them"
         + (missing > 0 ? $", {missing} not downloaded" : "") + ".");
-    foreach (var (bundle, known) in modified.OrderBy(m => m.Bundle))
-        Console.WriteLine($"  {TextColumn.Pad(bundle, 40)} {(known ? "modified by an installed mod" : "modified by something else")}");
-    if (modified.Any(m => !m.Known))
-        Console.WriteLine("\nBundles in the second group have no backup here. Verify the game's files "
-            + "through Steam before installing mods over them.");
+    foreach (var (bundle, known, kept) in modified.OrderBy(m => m.Bundle))
+        Console.WriteLine($"  {TextColumn.Pad(bundle, 40)} "
+            + (known ? "modified by an installed mod"
+                : kept ? "modified, and the original is kept here"
+                : "modified by something else"));
+    if (modified.Any(m => !m.Known && !m.Kept))
+        Console.WriteLine("\nThe bundles marked 'by something else' have no original kept here. Verify "
+            + "the game's files through Steam before installing mods over them.");
     return 0;
 }
 
@@ -348,7 +366,7 @@ if (command is "apply" or "mods" or "enable" or "disable" or "remove")
     }
 }
 
-if (command is not ("weapons" or "items" or "show" or "extract"))
+if (command is not ("weapons" or "items" or "show" or "extract" or "clips"))
 {
     Console.Error.WriteLine($"Unknown command '{command}'. Try --help.");
     return 2;
@@ -410,6 +428,77 @@ if (record is null)
 }
 
 var tree = new WeaponResolver(bundles, catalogs).Resolve(record);
+
+if (command == "clips")
+{
+    var found = tree.PrefabAssets
+        .Where(a => a.Class == AssetClassID.AnimationClip)
+        .Select(a =>
+        {
+            var bundle = a.Bundle.Length > 0 ? a.Bundle : tree.PrefabBundle!;
+            var file = bundles.Open(bundle);
+            var info = file.file.GetAssetInfo(a.PathId);
+            var field = info is null ? null : bundles.Context.Deserialize(file, info);
+            var motion = field is null ? null : Motion.Read(field);
+            return new ClipAddress(bundle, a.PathId, a.Name, motion?.Length ?? 0f);
+        })
+        .Where(c => Option("clip") is not { } only
+            || string.Equals(c.Name, only, StringComparison.OrdinalIgnoreCase))
+        .ToList();
+
+    if (found.Count == 0)
+    {
+        Console.Error.WriteLine($"#{record.GameNumber} {tree.DisplayName} has no such clip.");
+        return 1;
+    }
+
+    var stretch = Option("stretch");
+
+    // The reader holds these bundles open and the writer may be about to replace them. Put it down
+    // first: a write around a live reader fails with the file in use. The listing below comes from
+    // the installer instead, which reads what the game would load rather than what shipped.
+    bundles.Dispose();
+
+    var installer = new ClipInstaller(game, new ModStore(game));
+    try
+    {
+        Console.WriteLine($"#{record.GameNumber}  {tree.DisplayName}");
+        foreach (var clip in installer.Read(found))
+            Console.WriteLine($"  {clip.Name,-12} {clip.Length,7:F3}s  @ {clip.Bundle}");
+
+        if (stretch is null && !args.Contains("--restore")) return 0;
+        if (args.Contains("--restore"))
+        {
+            var back = installer.Restore(found.Select(c => c.Bundle));
+            Console.WriteLine(back.Count == 0
+                ? "Nothing to put back: no original of those bundles is kept here."
+                : $"Back as the game shipped them: {string.Join(", ", back)}");
+            return 0;
+        }
+
+        if (!float.TryParse(stretch, out var factor) || factor <= 0)
+        {
+            Console.Error.WriteLine("--stretch wants a number greater than zero: 0.5 halves a clip.");
+            return 2;
+        }
+
+        Console.WriteLine();
+        foreach (var done in installer.Stretch(
+                     found, factor, args.Contains("--fast") ? BundlePacking.Faster : BundlePacking.Smaller))
+            Console.WriteLine($"  {done.Name,-12} {done.Was,7:F3}s -> {done.Now,7:F3}s  @ {done.Bundle}");
+
+        Console.WriteLine("\n  This changes the game's own bundle and is not a .pgmod. The clip's length "
+            + "looks like something\n  the game reads as behaviour, so do this on a copy of the game. "
+            + "`--restore` puts it back.");
+        return 0;
+    }
+    catch (Exception ex) when (ex is IOException or InvalidOperationException or InvalidDataException
+                                   or UnauthorizedAccessException or FileNotFoundException)
+    {
+        Console.Error.WriteLine(ex.Message);
+        return 1;
+    }
+}
 
 if (command == "extract")
 {
