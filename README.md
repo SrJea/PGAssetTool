@@ -20,14 +20,14 @@ Everything to do with the game's assets, made simple.
 |---------|------|--------------------|
 | Weapons | ✅️ | |
 | Weapon skins | ✅️ | |
-| Hats | ⚠️ | CLI only. Not recommended, not supported |
-| Masks | ⚠️ | CLI only. Not recommended, not supported |
-| Avatars | ⚠️ | CLI only. Not recommended, not supported |
-| Capes | ⚠️ | CLI only. Not recommended, not supported |
-| Boots | ⚠️ | CLI only. Not recommended, not supported |
-| Gliders | ⚠️ | CLI only. Not recommended, not supported |
-| Transports | ⚠️ | CLI only. Not recommended, not supported |
-| Pets | ⚠️ | CLI only. Not recommended, not supported |
+| Hats | ⚠️ | Not recommended, not supported — now in the window as well as the CLI |
+| Masks | ⚠️ | Not recommended, not supported — now in the window as well as the CLI |
+| Avatars | ⚠️ | Not recommended, not supported — now in the window as well as the CLI |
+| Capes | ⚠️ | Not recommended, not supported — now in the window as well as the CLI |
+| Boots | ⚠️ | Not recommended, not supported — now in the window as well as the CLI |
+| Gliders | ⚠️ | Not recommended, not supported — now in the window as well as the CLI |
+| Transports | ⚠️ | Not recommended, not supported — now in the window as well as the CLI |
+| Pets | ⚠️ | Not recommended, not supported — now in the window as well as the CLI. About half of them carry no model of their own: it belongs to the pet their registry entry names, which the tool does not follow yet |
 | Gadgets | ❌️ | Planned |
 | Buttons and other UI | ❌️ | Planned |
 | Hat skins | ❌️ | Planned |
@@ -70,6 +70,7 @@ WIP...
 ## The three tabs
 
 **Browse** - The list of weapons, and a tree of the data the selected one refers to.\
+The box above the list chooses the kind: weapons, or the game's other cosmetics — see the table above for how far those are supported.\
 Search by the number in the in-game gallery, by the weapon's name in any language, or by its internal number.\
 In the data tree, the shortcut `Ctrl+Shift+R` switches to a simpler view.
 

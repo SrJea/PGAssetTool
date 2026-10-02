@@ -353,12 +353,19 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             // back by name: a reload rebuilds these objects, and the one held before it is not the
             // one in the list afterwards.
             var was = Kind.Name;
-            // Weapons only. The other kinds resolve, preview and extract the same way, but the user put
-            // them aside until weapons are finished, and offering them meant answering for them. The
-            // core still reads them and the command line still lists them; showing them again is this
-            // one filter.
+            // Every kind the game has something in. Weapons only for a long while — the others were
+            // put aside until weapons were finished, and offering them meant answering for them —
+            // and the command line went on reading them the whole time, which is how people came to
+            // be modding boots through it before the window would show one. Measured before opening
+            // it: hats, capes, masks, boots, gliders, transports and avatars resolve a bundle, a
+            // model and an icon for every item they have, in 6 to 19ms each against a weapon's 38.
+            // Pets are the exception: half of them are stub prefabs carrying no model of their own
+            // — 31 of 60 looked at had one — because the model belongs to the pet their registry
+            // entry names. They are offered as they are rather than held back, since the icon and
+            // the textures of such a pet are its own and can be worked on; following that name is
+            // its own piece of work and has not been done.
             Kinds.Clear();
-            foreach (var kind in _catalogs!.Kinds.Where(k => k == ItemKinds.Weapon)) Kinds.Add(kind);
+            foreach (var kind in _catalogs!.Kinds) Kinds.Add(kind);
             OnPropertyChanged(nameof(OffersKinds));
 
             // Put back quietly. Changing kinds by hand means "show me these instead", and takes the
@@ -925,12 +932,16 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     {
         if (_catalogs is not { } catalogs) return (null, null);
 
-        // Only weapons can be looked up, because weapons are the only kind anything here reads a
-        // catalogue for. Another kind falls through to the keys the pack recorded, which is the
-        // right answer until there is a catalogue to ask.
+        // A weapon by its number, anything else by the id its own registry knows it as — the number
+        // is a weapon's and is zero for every other kind. Looked up at all because a pack carries
+        // the key its author's game had: an installation whose registry has moved on answers for
+        // itself, and a pack from before any of this carries nothing to translate.
         var record = subject.Kind == Core.Pack.PackKind.Weapon
             ? catalogs.Items.ByGameNumber(subject.Number)
-            : null;
+            : Core.Catalog.ItemKinds.ByName(subject.Kind) is { } kind
+                ? catalogs.Of(kind).FirstOrDefault(
+                    r => string.Equals(r.Slug, subject.Id, StringComparison.OrdinalIgnoreCase))
+                : null;
 
         var variant = record is null || subject.Variant.Length == 0
             ? null
