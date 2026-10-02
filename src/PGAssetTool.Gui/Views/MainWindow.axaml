@@ -278,7 +278,8 @@
             <!-- Which of the game's kinds the list is showing. Weapons are what this opens on and
                  what most of it is for; the rest of the game's cosmetics are the same arrangement
                  under other names, so the only thing that changes below is what is in the list.
-                 Hidden while weapons are the only kind offered. -->
+                 Hidden while there is only one kind to offer, which is what an installation missing
+                 the other registries would leave. -->
             <ComboBox Name="Kinds" DockPanel.Dock="Top" ItemsSource="{Binding Kinds}"
                       SelectedItem="{Binding Kind}" HorizontalAlignment="Stretch" Margin="0,0,0,6"
                       IsVisible="{Binding OffersKinds}" />

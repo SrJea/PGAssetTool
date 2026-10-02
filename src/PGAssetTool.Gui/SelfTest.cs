@@ -148,7 +148,7 @@ internal static class SelfTest
             Console.WriteLine($"weapons  {model.Weapons.Count}");
             if (model.Weapons.Count == 0) return Fail("the catalog produced no weapons");
 
-            if (OnlyWeaponsAreOffered(model) is { } kindProblem) return Fail(kindProblem);
+            if (EveryKindIsOffered(model) is { } kindsProblem) return Fail(kindsProblem);
 
             if (WhichMeshIsTheWeapon(model) is { } wrongMesh) return Fail(wrongMesh);
 
@@ -951,6 +951,7 @@ internal static class SelfTest
 
             if (TheEditorPutsTheModelInItsPaint(model) is { } paintProblem) return Fail(paintProblem);
             if (OneMeshCanWearTwoPictures(model, model.WorkspaceRoot) is { } twoPaints) return Fail(twoPaints);
+            if (AnotherKindGoesTheWholeWay(model, model.WorkspaceRoot) is { } otherKind) return Fail(otherKind);
 
             var texture = model.Editor.Files.FirstOrDefault(f => f.Name.EndsWith(".png"));
             if (texture is null) return Fail("no texture in the extracted workspace");
@@ -2313,20 +2314,33 @@ internal static class SelfTest
         return furthest;
     }
 
-    /// The browser offers weapons and nothing else, and keeps the kind picker out of sight while it
-    /// does.
+    /// The browser offers every kind the game has something in, weapons first.
     ///
-    /// The game's other kinds — hats, capes, pets and the rest — resolve through the same code, but
-    /// the user put them aside until weapons are finished. They are hidden in the window rather than
-    /// taken out of the core, so bringing them back is one filter; this is what says the filter holds.
-    private static string? OnlyWeaponsAreOffered(MainViewModel model)
+    /// For months it offered weapons alone — the other kinds resolved through the same code and were
+    /// hidden in the window rather than taken out of the core — and this check said so. What it says
+    /// now is the opposite, because the command line never stopped reading them and people were
+    /// modding boots through it before the window would show one.
+    ///
+    /// Weapons first and selected, because that is what the tool is mostly for and what it opens on.
+    private static string? EveryKindIsOffered(MainViewModel model)
     {
         Console.WriteLine($"kinds    offered: {string.Join(", ", model.Kinds.Select(k => k.Name))}; "
-            + $"picker {(model.OffersKinds ? "shown" : "hidden")}");
+            + $"picker {(model.OffersKinds ? "shown" : "hidden")}; showing {model.Kind.Name}");
 
-        if (model.Kinds.Count != 1 || model.Kinds[0] != Core.Catalog.ItemKinds.Weapon)
-            return $"the browser offers {string.Join(", ", model.Kinds.Select(k => k.Name))}, not weapons alone";
-        if (model.OffersKinds) return "the kind picker is shown with nothing to choose between";
+        if (model.Kinds.Count == 0) return "the browser offers no kinds at all";
+        if (model.Kinds[0] != Core.Catalog.ItemKinds.Weapon)
+            return $"the browser opens on {model.Kinds[0].Name} rather than on weapons";
+        if (model.Kind != Core.Catalog.ItemKinds.Weapon)
+            return $"the browser is showing {model.Kind.Name} rather than weapons";
+
+        // Every kind in the registry, in the order the registry lists them. Fewer would mean one of
+        // them resolving nothing in this installation, which is worth hearing about rather than
+        // quietly leaving out of the picker.
+        var missing = Core.Catalog.ItemKinds.All.Where(k => !model.Kinds.Contains(k)).ToList();
+        if (missing.Count > 0)
+            return $"the browser leaves out {string.Join(", ", missing.Select(k => k.Name))}";
+
+        if (!model.OffersKinds) return "there is more than one kind and the picker is hidden";
 
         return null;
     }
@@ -2593,6 +2607,125 @@ internal static class SelfTest
         finally
         {
             Directory.Delete(temp, recursive: true);
+        }
+    }
+
+    /// A kind that is not a weapon goes the whole way: browsed, previewed, extracted, packed.
+    ///
+    /// Every kind is the same arrangement under different names, which is why there is one resolver
+    /// and one pack format — but the window offered weapons only for months, and in the meantime
+    /// people were modding boots through the command line, which never stopped reading them. So the
+    /// path they were already using had never been driven through the window's own view models.
+    ///
+    /// Boots, because they are the plainest of the other kinds: measured over all 47 of them, every
+    /// one resolves a bundle, a model and an icon, at 6ms each against a weapon's 38. What this adds
+    /// over the weapon run above is only what the kind changes — the picker, the list, a record with
+    /// no number, and a pack whose subject says `boots`.
+    ///
+    /// It stops at the pack rather than installing one. Applying is kind-blind: `ModApplier` reads
+    /// the subject for one thing only, which is `Relocation.Candidates` asking where the item's
+    /// assets are now, and that is checked here directly. The install, toggle and remove machinery
+    /// is the same code the weapon packs above drive through it.
+    private static string? AnotherKindGoesTheWholeWay(MainViewModel model, string root)
+    {
+        const string slug = "boots_black_dragon";
+        var kind = Core.Catalog.ItemKinds.Boots;
+        var (wasKind, wasWorkspace) = (model.Kind, model.Editor.SelectedWorkspace?.Directory);
+
+        if (!model.Kinds.Contains(kind)) return $"the window does not offer {kind.Name}";
+
+        try
+        {
+            if (!Select(model, kind, slug)) return $"'{slug}' could not be selected as a {kind.Name}";
+            if (model.Detail is not { } detail) return $"'{slug}' was selected and nothing was shown";
+
+            var tree = detail.Tree;
+            Console.WriteLine($"kinds    {model.Kinds.Count} offered; {kind.Name} has {model.Weapons.Count}, "
+                + $"'{slug}' is {tree.PrefabAssets.Count} objects in {tree.PrefabBundle ?? "no bundle"}, "
+                + $"icon {tree.Icon?.TextureName ?? "none"}");
+
+            if (tree.PrefabBundle is null) return $"'{slug}' resolved no bundle";
+            if (tree.MainMesh is null) return $"'{slug}' resolved no model";
+            if (tree.Icon is null) return $"'{slug}' resolved no icon";
+
+            // The window opens a weapon on its own model; the same has to happen for a kind whose
+            // records carry no number, since that is what the selection is matched on.
+            if (detail.SelectedNode is not { Class: AssetClassID.Mesh } opened)
+                return $"'{slug}' did not open on its model";
+            if (!Arrived(model, opened)) return $"'{opened.Label}' never reached the preview";
+            if (model.Preview.Nothing is { } why) return $"'{opened.Label}': {why}";
+
+            Console.WriteLine($"kinds    preview {model.Preview.Caption}");
+
+            model.ExtractWeaponCommand.Execute(null);
+            WaitWhile(() => model.Busy, 120_000);
+            if (model.LastExport is not { } directory || !Directory.Exists(directory))
+                return $"extracting '{slug}' wrote nothing: {model.Status}";
+
+            try
+            {
+                model.Editor.Rescan(root);
+                if (model.Editor.Workspaces.FirstOrDefault(w => w.Directory == directory) is not { } opened2)
+                    return $"the workspace extracted for '{slug}' did not appear in the editor";
+
+                model.Editor.SelectedWorkspace = opened2;
+                var manifest = Core.Pack.Workspace.Read(directory);
+
+                Console.WriteLine($"kinds    extracted {model.Editor.Files.Count} files, subject "
+                    + $"{manifest.Subject?.Kind ?? "none"}/{manifest.Subject?.Id ?? "none"}");
+
+                if (manifest.Subject?.Kind != kind.Pack)
+                    return $"the workspace says it is for '{manifest.Subject?.Kind}', not '{kind.Pack}'";
+
+                // Packing keeps only what differs from the export, so something has to differ.
+                if (manifest.Operations.FirstOrDefault(o => o.Source.EndsWith(".png")) is not { } texture)
+                    return $"the workspace for '{slug}' has no texture to edit";
+
+                var path = Path.Combine(directory, texture.Source);
+                File.WriteAllBytes(path, [.. File.ReadAllBytes(path), .. new byte[16]]);
+
+                var built = Core.Pack.PackBuilder.Build(
+                    directory, Path.Combine(directory, "boots.pgmod"), signer: null);
+
+                Console.WriteLine($"kinds    packed {built.Operations} operation(s), {built.Bytes:N0} bytes");
+                if (built.Operations != 1)
+                    return $"one file was edited and the pack holds {built.Operations} operations";
+
+                // Applying asks the subject one question: where this item's assets are now
+                // (Relocation.Candidates). It answers that by finding the item in the catalogues,
+                // and for a kind that is not a weapon that means its id against the registry's
+                // slug — a weapon is found by number, which this kind has none of. Checked here as
+                // the list in front of us, which holds the same records the catalogues would hand
+                // back, rather than by opening a second reader on the game to ask again.
+                var subject = Core.Pack.PackBuilder.ReadManifest(built.Path).Subject!;
+                var findable = model.Weapons.Any(w =>
+                    string.Equals(w.Record.Slug, subject.Id, StringComparison.OrdinalIgnoreCase));
+
+                Console.WriteLine($"kinds    the pack is for '{subject.Id}', which the {kind.Name} "
+                    + $"registry {(findable ? "has" : "does not have")}");
+
+                return findable
+                    ? null
+                    : $"the pack says it is for '{subject.Id}' and no {kind.Name} is filed under that id, "
+                        + "so applying it would have nowhere to look for its assets";
+            }
+            finally
+            {
+                try { Directory.Delete(directory, recursive: true); } catch (IOException) { }
+                model.Editor.Rescan(root);
+                model.Editor.SelectedWorkspace = wasWorkspace is null
+                    ? model.Editor.Workspaces.FirstOrDefault()
+                    : model.Editor.Workspaces.FirstOrDefault(w => w.Directory == wasWorkspace);
+            }
+        }
+        finally
+        {
+            // Back to weapons, which everything after this is about.
+            if (model.Kind != wasKind)
+            {
+                model.Kind = wasKind;
+                WaitWhile(() => model.Weapons.Count == 0, 60_000);
+            }
         }
     }
 
@@ -4079,6 +4212,27 @@ internal static class SelfTest
     {
         model.Selected = model.Weapons.First(w => w.Record.GameNumber == number);
         return WaitWhile(() => model.Detail?.Tree.Record.GameNumber != number, 60_000);
+    }
+
+    /// Shows a kind and selects one item of it by the id its registry knows it as.
+    ///
+    /// By slug rather than by number, because a number is a weapon's: every other kind has zero.
+    private static bool Select(MainViewModel model, Core.Catalog.ItemKind kind, string slug)
+    {
+        if (model.Kind != kind)
+        {
+            model.Kind = kind;
+            if (!WaitWhile(() => model.Weapons.Count == 0, 60_000)) return false;
+        }
+
+        if (model.Weapons.FirstOrDefault(w =>
+                string.Equals(w.Record.Slug, slug, StringComparison.OrdinalIgnoreCase)) is not { } row)
+            return false;
+
+        model.Selected = row;
+        return WaitWhile(
+            () => !string.Equals(model.Detail?.Tree.Record.Slug, slug, StringComparison.OrdinalIgnoreCase),
+            60_000);
     }
 
     private static int CountRows(IEnumerable<TreeNode> nodes)

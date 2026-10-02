@@ -42,9 +42,9 @@ in it has a concept of a weapon.
 holding them, `IconResolver` finds the one picture that stands for an item. This layer answers
 "what exists, and where".
 
-**The shell** — the GUI and the CLI — puts the two together. The window offers weapons only, by one
-filter where it loads the catalogues; the other kinds are still read underneath, and the CLI lists
-them.
+**The shell** — the GUI and the CLI — puts the two together. The window offers every kind the game
+has something in, weapons first and selected; it offered weapons alone until 2026-10-02, by one
+filter where it loads the catalogues, while the CLI read them the whole time.
 
 Adding another kind of item is work in the middle layer. The layers below and above it already do
 what they would need to do.
