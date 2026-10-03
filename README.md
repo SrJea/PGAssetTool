@@ -63,7 +63,19 @@ dotnet publish src/PGAssetTool.Gui -c Release -o dist
 
 ## Making a mod pack
 
-WIP...
+1. **Extract the item.** In **Browse**, pick the kind and the item, then press Extract (`Ctrl+E`). Its files are
+   written into a workspace folder under `PGAssetTool-data/workspace` (`Ctrl+O` opens it): `textures/` (`.png`),
+   `meshes/` (`.glb`), `audio/` and, for weapons, `animations/`, beside a `pgmod.json` that says which file
+   replaces what.
+2. **Edit the files you want to change**, in the program you would use anyway: an image editor for the
+   textures, Blender for the models, any sound editor for the sounds. Save over the file with the same name, or
+   drop the edited file onto the tool's window and it goes in its place. Animations are changed in the Editor
+   (see below).
+3. **Check it in the Editor.** Each changed file is shown next to the game's own, the model wearing your
+   textures and playing your animations. Pack details, at the bottom left, set the pack's name, author, version, description and icon.
+4. **Build pack** writes a `.pgmod` into the workspace folder, holding only the files you changed. **Build and
+   apply** also installs it.
+5. **Manager** turns it off, back on, or removes it. Removing a mod puts the game's own files back.
 
 ---
 
@@ -84,7 +96,9 @@ Build and apply installs the mod pack in one click.\
 Selecting a weapon's animation plays it on the model, the game's next to the workspace's. It can be swapped for
 another item's animation — type its number or name, pick the clip, Use — or for one made in Blender: Write a .glb
 to edit puts every animation and the model into `animations/animations.glb`, and Use a .glb (or dropping the file
-on the window) brings the edited one back. Put the original back undoes either.**An animation always keeps the length of the weapon's own**: the game times shots and reloads by them, so the
+on the window) brings the edited one back. A `.anim` dragged in from another weapon's workspace is fitted to
+this weapon's bones the same way. Put the original back undoes any of them.\
+**An animation always keeps the length of the weapon's own**: the game times shots and reloads by them, so the
 new motion is played faster or slower to fit, and the weapon fires and reloads exactly as before.
 
 **Manager** - Look after the mod packs you have installed.\
@@ -181,7 +195,7 @@ dotnet run --project src/PGAssetTool.Cli -c Release -- <command>
 | `remove <id>...` | Uninstall mods. A mod can be named by its id, by the start of its id, or by its name, as long as that names only one. |
 | `verify` | Check every bundle against the hash the game recorded for it. |
 | `consolidate` | Report what emptying the downloaded cache would change. `--apply` removes only the copies that change nothing. |
-| `animation <directory> [<clip>]` | List a workspace's animations, or change one: `--from <item>` puts in that item's animation of the same name (or `--clip <name>`), fitted to this item's bones; `--glb <file>` puts in one from a glTF; `--reset` puts the original back. `--export` writes them all, with the item's models, into one `.glb` to edit. |
+| `animation <directory> [<clip>]` | List a workspace's animations, or change one: `--from <item>` puts in that item's animation of the same name (or `--clip <name>`), fitted to this item's bones; `--anim <file>` puts in a `.anim` from another workspace; `--glb <file>` puts in one from a glTF; `--reset` puts the original back. `--export` writes them all, with the item's models, into one `.glb` to edit. The animation always keeps this item's own length. |
 
 | Option | What it does |
 | --- | --- |
@@ -281,6 +295,10 @@ classes only and has nothing to do with the game's own code.** See
 - It rewrites the game's files, so use it at your own risk. The author accepts no responsibility for any
   damage arising from using this tool, including any effect on your account (such as a ban).
 - Do not redistribute other people's work without their permission.
+- The tool changes how things look, never how they play. A replaced animation is always stretched or squeezed to
+  the length of the weapon's own, because the game times shots and reloads by its animations and another length
+  would change the weapon's fire rate and damage. If you installed animation mods with a version from before
+  this, use **Reapply all** in the Manager.
 
 ---
 
