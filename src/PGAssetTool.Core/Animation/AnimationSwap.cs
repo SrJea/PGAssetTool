@@ -94,8 +94,9 @@ public static class AnimationSwap
                 + $"{string.Join(", ", unmatched.Take(4))}{(unmatched.Count > 4 ? ", …" : "")}.");
 
         var name = $"{Describe(catalogs, from)}: {chosen.Name}";
-        ClipFile.FromMotion(moved, name, unmatched).Write(Path.Combine(workspace, slot.Source));
-        return new Outcome(name, moved.Curves.Count, unmatched, moved.Length);
+        var (fitted, notes) = FitToSlot(bundles, slot, moved);
+        ClipFile.FromMotion(fitted, name, unmatched).Write(Path.Combine(workspace, slot.Source));
+        return new Outcome(name, fitted.Curves.Count, unmatched, fitted.Length, notes);
     }
 
     /// Puts the slot's own clip back, exactly as the extract wrote it — so the file is unedited
@@ -140,9 +141,10 @@ public static class AnimationSwap
         var name = $"{Path.GetFileName(glb)}: {imported.Take}";
         // Left as it is, where it is what it was: rewritten, it would say it came from the file, and
         // an animation opened and saved without an edit would count as edited.
+        var (fitted, fitting) = FitToSlot(bundles, slot, imported.Motion);
         if (!imported.Same)
-            ClipFile.FromMotion(imported.Motion, name, imported.Unmatched).Write(Path.Combine(workspace, slot.Source));
-        return new Outcome(name, imported.Motion.Curves.Count, imported.Unmatched, imported.Motion.Length, imported.Notes,
+            ClipFile.FromMotion(fitted, name, imported.Unmatched).Write(Path.Combine(workspace, slot.Source));
+        return new Outcome(name, fitted.Curves.Count, imported.Unmatched, fitted.Length, [.. imported.Notes, .. fitting],
             imported.Same);
     }
 
@@ -192,8 +194,22 @@ public static class AnimationSwap
                 + $"{string.Join(", ", unmatched.Take(4))}{(unmatched.Count > 4 ? ", …" : "")}.");
 
         var from = clip.From.Length > 0 ? clip.From : name;
-        ClipFile.FromMotion(moved, from, unmatched).Write(destination);
-        return new Outcome(from, moved.Curves.Count, unmatched, moved.Length);
+        var (fitted, notes) = FitToSlot(bundles, slot, moved);
+        ClipFile.FromMotion(fitted, from, unmatched).Write(destination);
+        return new Outcome(from, fitted.Curves.Count, unmatched, fitted.Length, notes);
+    }
+
+    /// The motion made as long as the slot's own clip, and what to say about it. See ClipImporter:
+    /// the game times the weapon by its clips, so a clip of another length changes how it fights.
+    private static (Motion Motion, IReadOnlyList<string> Notes) FitToSlot(BundleSet bundles, Slot slot, Motion motion)
+    {
+        var own = PathIdOf(bundles, slot) is { } id ? Read(bundles, slot.Target.Container, id) : null;
+        if (own is not { Length: > 0 } || MathF.Abs(own.Length - motion.Length) < 1e-3f) return (motion, []);
+        return (ClipImporter.Fit(motion, own.Length),
+        [
+            $"Played in {own.Length:0.00}s rather than {motion.Length:0.00}s: the length of this item's own "
+            + $"{slot.Clip}, which the game times the weapon by, so it shoots and reloads as it always has.",
+        ]);
     }
 
     /// The workspace a `.anim` belongs to and the slot it is there, looked for a few folders up.

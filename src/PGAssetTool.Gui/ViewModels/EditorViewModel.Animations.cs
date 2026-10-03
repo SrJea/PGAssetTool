@@ -143,7 +143,8 @@ public sealed partial class EditorViewModel
         {
             var outcome = AnimationSwap.Use(bundles, catalogs, workspace.Directory, slot, item, clip);
             return $"{file.Target.Name} now plays {outcome.From}: {outcome.Moved} curves fitted to this item"
-                + (outcome.Unmatched.Count > 0 ? $", {outcome.Unmatched.Count} left out with nothing here to move." : ".");
+                + (outcome.Unmatched.Count > 0 ? $", {outcome.Unmatched.Count} left out with nothing here to move." : ".")
+                + (outcome.Notes is { Count: > 0 } n ? " " + string.Join(" ", n) : "");
         });
     }
 
@@ -281,7 +282,8 @@ public sealed partial class EditorViewModel
                     lines.Add(outcome.Unchanged
                         ? $"{file.Target.Name} is already that file."
                         : $"{file.Target.Name} now plays {outcome.From}: {outcome.Moved} curves"
-                          + (outcome.Unmatched.Count > 0 ? $", {outcome.Unmatched.Count} left out with nothing here to move." : "."));
+                          + (outcome.Unmatched.Count > 0 ? $", {outcome.Unmatched.Count} left out with nothing here to move." : ".")
+                          + (outcome.Notes is { Count: > 0 } n ? " " + string.Join(" ", n) : ""));
                 }
                 catch (Exception e) when (e is InvalidOperationException or InvalidDataException or IOException
                                               or KeyNotFoundException or UnauthorizedAccessException)

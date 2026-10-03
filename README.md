@@ -84,7 +84,8 @@ Build and apply installs the mod pack in one click.\
 Selecting a weapon's animation plays it on the model, the game's next to the workspace's. It can be swapped for
 another item's animation — type its number or name, pick the clip, Use — or for one made in Blender: Write a .glb
 to edit puts every animation and the model into `animations/animations.glb`, and Use a .glb (or dropping the file
-on the window) brings the edited one back. Put the original back undoes either.
+on the window) brings the edited one back. Put the original back undoes either.**An animation always keeps the length of the weapon's own**: the game times shots and reloads by them, so the
+new motion is played faster or slower to fit, and the weapon fires and reloads exactly as before.
 
 **Manager** - Look after the mod packs you have installed.\
 Turn on/off switches a mod on or off\

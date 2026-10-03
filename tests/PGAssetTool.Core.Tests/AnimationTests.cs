@@ -384,3 +384,48 @@ public class RetargetGunRootTests
         Assert.Equal(["gun/Hand"], result.Unmatched);
     }
 }
+
+/// A clip keeps the length the game shipped it with, whatever is written into it: the game times
+/// shots and reloads by its clips, and another length is another fire rate.
+public class ClipLengthTests
+{
+    private static Motion Shot(float length) => new("Shoot", length, 30,
+    [
+        new MotionCurve("gun", MotionChannel.Position,
+        [
+            new MotionKey(0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0),
+            new MotionKey(length / 2, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
+            new MotionKey(length, 0, 0, 0, 0, float.PositiveInfinity, 0, 0, 0, -1, 0, 0, 0),
+        ]),
+    ]);
+
+    [Theory]
+    [InlineData(0.67f, 2.6f)]
+    [InlineData(3.23f, 0.17f)]
+    public void AMotionIsMadeExactlyAsLongAsTheClipItGoesInto(float given, float length)
+    {
+        var fitted = ClipImporter.Fit(Shot(given), length);
+
+        Assert.Equal(length, fitted.Length);
+        Assert.Equal(length, fitted.Curves.SelectMany(c => c.Keys).Max(k => k.Time));
+        // The same curve at another speed: where it was halfway, it is halfway.
+        var k = length / given;
+        for (var f = 0f; f <= 1f; f += 0.125f)
+            Assert.Equal(Motion.Sample(Shot(given).Curves[0], given * f).X, Motion.Sample(fitted.Curves[0], length * f).X, 4);
+        Assert.Equal(2 / k, fitted.Curves[0].Keys[0].OutX, 4);
+        Assert.True(float.IsPositiveInfinity(fitted.Curves[0].Keys[2].InX));
+    }
+
+    [Fact]
+    public void APoseIsHeldForTheLength()
+    {
+        var pose = new Motion("Idle", 0, 30, [new MotionCurve("gun", MotionChannel.Position, [new MotionKey(0, 1, 2, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0)])]);
+        var fitted = ClipImporter.Fit(pose, 0.17f);
+        Assert.Equal(0.17f, fitted.Curves[0].Keys[^1].Time);
+        Assert.Equal((1f, 2f, 3f), (fitted.Curves[0].Keys[^1].X, fitted.Curves[0].Keys[^1].Y, fitted.Curves[0].Keys[^1].Z));
+    }
+
+    [Fact]
+    public void TheRightLengthIsLeftAlone()
+        => Assert.Equal(Shot(1).Curves[0].Keys, ClipImporter.Fit(Shot(1), 1).Curves[0].Keys);
+}
