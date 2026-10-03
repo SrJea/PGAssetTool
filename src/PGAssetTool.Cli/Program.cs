@@ -2,6 +2,8 @@ using System.Diagnostics;
 using System.Text;
 using AssetsTools.NET.Extra;
 using PGAssetTool.Cli;
+using PGAssetTool.Core.Clips;
+using PGAssetTool.Core.Preview;
 using PGAssetTool.Core.Assets;
 using PGAssetTool.Core.Catalog;
 using PGAssetTool.Core.Export;
@@ -31,6 +33,17 @@ if (command is "-h" or "--help" or "help")
                                in-game number (819), a prefab name (Weapon1257) or a slug; anything
                                else takes the id `items` lists. Note that a weapon's in-game number
                                and its prefab number are different sequences.
+
+          clips <item>         List an item's animation clips and how long each one lasts.
+                               --from <item> puts another weapon's motion on them, clip by clip of
+                               the same name, each kept at the length it already had. --dry-run
+                               says what that would do without doing it, which is worth reading
+                               first: it names the parts the borrowed motion would drive and the
+                               ones it would stop driving. A clip's own length is never changed:
+                               the game reads that as the rate of fire.
+                               This is not a .pgmod and leaves no entry in the ledger; the bundle
+                               is backed up first and --restore puts it back. --clip <name> does
+                               one clip rather than all of them.
 
           extract <item>       Write out what can be changed of an item: images as PNG, audio as
                                WAV or Ogg, meshes as glTF. With --workspace, also writes a
@@ -230,7 +243,7 @@ if (command == "verify")
 {
     var store = new ModStore(game);
     var expected = store.Read().SelectMany(m => m.TouchedBundles.Keys).ToHashSet(StringComparer.OrdinalIgnoreCase);
-    var modified = new List<(string Bundle, bool Known)>();
+    var modified = new List<(string Bundle, bool Known, bool Kept)>();
     var missing = 0;
 
     var fromDownloaded = 0;
@@ -239,18 +252,27 @@ if (command == "verify")
         if (game.Resolve(entry.Name, entry.Hash) is not { } resolved) { missing++; continue; }
         if (resolved.Cache == CacheKind.Downloaded) fromDownloaded++;
         if (!BundleIntegrity.IsPristine(resolved.Path, entry.Hash))
-            modified.Add((entry.Name, expected.Contains(entry.Name)));
+            // Whether the original is kept is asked of the backups rather than read off the ledger.
+            // Not everything that writes to a bundle leaves a ledger entry — retiming a clip does
+            // not, and neither does replacing the interface font — and those do back the bundle up.
+            // Told by the ledger alone, this said "no backup here" about a bundle whose original was
+            // sitting in the backup folder, and sent the author to Steam to repair nothing.
+            modified.Add((entry.Name, expected.Contains(entry.Name),
+                store.HasBackup(resolved.Cache, entry.Name, entry.Hash)));
     }
     if (fromDownloaded > 0)
         Console.WriteLine($"{fromDownloaded} bundle(s) load from the downloaded cache rather than the shipped one.");
 
     Console.WriteLine($"{modified.Count} bundle(s) differ from the hash the game recorded for them"
         + (missing > 0 ? $", {missing} not downloaded" : "") + ".");
-    foreach (var (bundle, known) in modified.OrderBy(m => m.Bundle))
-        Console.WriteLine($"  {TextColumn.Pad(bundle, 40)} {(known ? "modified by an installed mod" : "modified by something else")}");
-    if (modified.Any(m => !m.Known))
-        Console.WriteLine("\nBundles in the second group have no backup here. Verify the game's files "
-            + "through Steam before installing mods over them.");
+    foreach (var (bundle, known, kept) in modified.OrderBy(m => m.Bundle))
+        Console.WriteLine($"  {TextColumn.Pad(bundle, 40)} "
+            + (known ? "modified by an installed mod"
+                : kept ? "modified, and the original is kept here"
+                : "modified by something else"));
+    if (modified.Any(m => !m.Known && !m.Kept))
+        Console.WriteLine("\nThe bundles marked 'by something else' have no original kept here. Verify "
+            + "the game's files through Steam before installing mods over them.");
     return 0;
 }
 
@@ -348,7 +370,7 @@ if (command is "apply" or "mods" or "enable" or "disable" or "remove")
     }
 }
 
-if (command is not ("weapons" or "items" or "show" or "extract"))
+if (command is not ("weapons" or "items" or "show" or "extract" or "clips"))
 {
     Console.Error.WriteLine($"Unknown command '{command}'. Try --help.");
     return 2;
@@ -410,6 +432,208 @@ if (record is null)
 }
 
 var tree = new WeaponResolver(bundles, catalogs).Resolve(record);
+
+if (command == "clips")
+{
+    // Whether a curve actually moves what it is bound to, or only holds it where it is.
+    //
+    // Most of what a weapon's clips name, they pin: two keys of the same value, which puts the
+    // object somewhere and leaves it. Those curves are why "this would stop being animated" reads
+    // far worse than it is — nothing was being animated. Measured on Prototype, 42 of the 46 curves
+    // a transplant from Prototype S drops are of this kind. Anything that is not exactly constant
+    // counts as moving: the smallest real motion found is a rotation over 0.004, four thousand
+    // times the margin here, so there is no judgement to make.
+    static bool Moves(MotionCurve curve)
+    {
+        static float Spread(MotionCurve curve, Func<MotionKey, float> of)
+            => curve.Keys.Max(of) - curve.Keys.Min(of);
+
+        return Spread(curve, k => k.X) > 1e-6f || Spread(curve, k => k.Y) > 1e-6f
+            || Spread(curve, k => k.Z) > 1e-6f || Spread(curve, k => k.W) > 1e-6f;
+    }
+
+    // Each clip, what it drives, and what it lasts. Read here, while the reader is still up.
+    //
+    // What it drives is counted rather than listed, because a path's curves are spread over every
+    // clip and the question asked of them later — does this object move at all — is about all of
+    // them at once.
+    (List<ClipAddress> Clips, string Root, Dictionary<string, (int Curves, int Moving)> Drives)
+        ClipsOf(WeaponTree of)
+    {
+        var addresses = new List<ClipAddress>();
+        var root = "";
+        var drives = new Dictionary<string, (int Curves, int Moving)>(StringComparer.Ordinal);
+
+        foreach (var asset in of.PrefabAssets.Where(a => a.Class == AssetClassID.AnimationClip))
+        {
+            var bundle = asset.Bundle.Length > 0 ? asset.Bundle : of.PrefabBundle!;
+            var file = bundles.Open(bundle);
+            var info = file.file.GetAssetInfo(asset.PathId);
+            var field = info is null ? null : bundles.Context.Deserialize(file, info);
+            var motion = field is null ? null : Motion.Read(field);
+
+            addresses.Add(new ClipAddress(bundle, asset.PathId, asset.Name, motion?.Length ?? 0f));
+
+            if (motion is null) continue;
+            foreach (var curve in motion.Curves)
+            {
+                var (curves, moving) = drives.GetValueOrDefault(curve.Path);
+                drives[curve.Path] = (curves + 1, moving + (Moves(curve) ? 1 : 0));
+            }
+
+            // What this weapon's own curves hang from, which is what another weapon's motion has to
+            // be hung from to drive anything here.
+            if (root.Length == 0)
+                root = motion.Curves
+                    .Select(c => c.Path)
+                    .Where(p => p.Contains('/'))
+                    .Select(p => p[..p.IndexOf('/')])
+                    .FirstOrDefault() ?? "";
+        }
+
+        return (addresses, root, drives);
+    }
+
+    var (all, ownRoot, ownPaths) = ClipsOf(tree);
+    var found = all
+        .Where(c => Option("clip") is not { } only
+            || string.Equals(c.Name, only, StringComparison.OrdinalIgnoreCase))
+        .ToList();
+
+    if (found.Count == 0)
+    {
+        Console.Error.WriteLine($"#{record.GameNumber} {tree.DisplayName} has no such clip.");
+        return 1;
+    }
+
+    // The other weapon's motion, when one was named. Resolved before the reader goes down.
+    List<ClipMove> moves = [];
+    IReadOnlyCollection<string> drives = [];
+    if (Option("from") is { } donor)
+    {
+        if (catalogs.Find(donor) is not { } other)
+        {
+            Console.Error.WriteLine($"Nothing matches '{donor}'.");
+            return 1;
+        }
+
+        var (theirs, _, theirPaths) = ClipsOf(new WeaponResolver(bundles, catalogs).Resolve(other));
+        moves = found
+            .Select(mine => (Mine: mine, Theirs: theirs.FirstOrDefault(t =>
+                string.Equals(t.Name, mine.Name, StringComparison.OrdinalIgnoreCase))))
+            .Where(pair => pair.Theirs is not null)
+            .Select(pair => new ClipMove(pair.Mine, pair.Theirs!, ownRoot))
+            .ToList();
+
+        // What this weapon's own clips drive, so that an object a borrowed motion names and this
+        // rig has never heard of is said out loud rather than silently animating nothing.
+        drives = ownPaths.Keys;
+
+        Console.WriteLine($"#{record.GameNumber}  {tree.DisplayName}   <- "
+            + $"#{other.GameNumber} {catalogs.Localization.Translate(other.LocalizationKey) ?? other.Slug}");
+        foreach (var pair in found.Where(f => moves.All(m => m.Into.Name != f.Name)))
+            Console.WriteLine($"  {pair.Name,-12} left alone: the other weapon has no clip of that name");
+
+        // Looking before writing. The plan is worth seeing on its own: whether the two rigs line up
+        // is the question that decides whether a borrowed motion will show anything, and the answer
+        // is a list of names that can be read in a second.
+        if (args.Contains("--dry-run"))
+        {
+            // What the other weapon's curves would be hung from here.
+            string Rebound(string path) => path.Length == 0 ? path
+                : path.Contains('/') ? ownRoot + path[path.IndexOf('/')..]
+                : ownRoot;
+
+            foreach (var move in moves)
+                Console.WriteLine($"  {move.Into.Name,-12} {move.Into.Length,7:F3}s would keep its length"
+                    + (Math.Abs(move.Into.Length - move.From.Length) > 0.001f
+                        ? $", the motion being stretched from {move.From.Length:F3}s"
+                        : ", which is what the motion already lasts"));
+
+            // A curve on the root object itself names no path and is not an object to look for.
+            var borrowed = theirPaths.Keys
+                .Select(Rebound)
+                .Where(p => p.Length > 0)
+                .Distinct(StringComparer.Ordinal)
+                .ToList();
+            var strangers = borrowed.Where(p => p.Length > 0 && !ownPaths.ContainsKey(p)).ToList();
+
+            Console.WriteLine($"\n  {borrowed.Count - strangers.Count} of {borrowed.Count} objects it "
+                + $"animates are in this weapon's own rig, under '{ownRoot}'");
+            foreach (var path in strangers)
+                Console.WriteLine($"    nothing here is called '{path}', so that curve would drive nothing");
+            // Which of these matters is the whole question, and it is not the count of them. A path
+            // whose every curve only holds a pose is driven now and loses nothing by not being;
+            // one with curves that move loses a motion somebody may be looking at. Said apart,
+            // because together they read as four things going wrong when one of them is.
+            var dropped = ownPaths
+                .Where(p => p.Key.Length > 0 && !borrowed.Contains(p.Key, StringComparer.Ordinal))
+                .ToList();
+
+            foreach (var (path, counted) in dropped.Where(p => p.Value.Moving > 0))
+                Console.WriteLine($"    '{path}' moves in {counted.Moving} of its {counted.Curves} "
+                    + "curves and would stop: that motion is lost");
+            foreach (var (path, counted) in dropped.Where(p => p.Value.Moving == 0))
+                Console.WriteLine($"    '{path}' is driven now, but all {counted.Curves} of its "
+                    + "curves only hold it still, so nothing is lost");
+
+            Console.WriteLine("\n  Nothing was written. Run it again without --dry-run to do it.");
+            return 0;
+        }
+    }
+
+    // The reader holds these bundles open and the writer may be about to replace them. Put it down
+    // first: a write around a live reader fails with the file in use. The listing below comes from
+    // the installer instead, which reads what the game would load rather than what shipped.
+    bundles.Dispose();
+
+    var installer = new ClipInstaller(game, new ModStore(game));
+    try
+    {
+        if (moves.Count == 0) Console.WriteLine($"#{record.GameNumber}  {tree.DisplayName}");
+        foreach (var clip in installer.Read(found))
+            Console.WriteLine($"  {clip.Name,-12} {clip.Length,7:F3}s  @ {clip.Bundle}");
+
+        if (moves.Count > 0)
+        {
+            Console.WriteLine();
+            var unknown = new List<string>();
+            foreach (var done in installer.Transplant(
+                         moves, args.Contains("--fast") ? BundlePacking.Faster : BundlePacking.Smaller))
+            {
+                Console.WriteLine($"  {done.Name,-12} {done.Now,7:F3}s  <- {done.From}"
+                    + (Math.Abs(done.Now - done.Was) > 0.001f ? $"  (was {done.Was:F3}s)" : " (same length)"));
+                unknown.AddRange(done.Paths.Where(p => p.Length > 0 && !drives.Contains(p)));
+            }
+
+            // Said rather than refused. Whether a part this weapon has not got matters is something
+            // the author can see in the preview and nothing here can judge.
+            foreach (var path in unknown.Distinct(StringComparer.Ordinal))
+                Console.WriteLine($"    nothing here is called '{path}', so that curve drives nothing");
+
+            Console.WriteLine("\n  Each clip kept the length it already had: the game appears to read "
+                + "that as the rate of\n  fire. This changes the game's own bundle and is not a .pgmod; "
+                + "`--restore` puts it back.");
+            return 0;
+        }
+
+        if (args.Contains("--restore"))
+        {
+            var back = installer.Restore(found.Select(c => c.Bundle));
+            Console.WriteLine(back.Count == 0
+                ? "Nothing to put back: no original of those bundles is kept here."
+                : $"Back as the game shipped them: {string.Join(", ", back)}");
+        }
+
+        return 0;
+    }
+    catch (Exception ex) when (ex is IOException or InvalidOperationException or InvalidDataException
+                                   or UnauthorizedAccessException or FileNotFoundException)
+    {
+        Console.Error.WriteLine(ex.Message);
+        return 1;
+    }
+}
 
 if (command == "extract")
 {
