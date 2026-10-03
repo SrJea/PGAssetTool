@@ -9,9 +9,6 @@ namespace PGAssetTool.Core.Clips;
 /// One clip as the reader found it, which is all the writer needs to go back to it.
 public sealed record ClipAddress(string Bundle, long PathId, string Name, float Length);
 
-/// What one clip became.
-public sealed record ClipRetimed(string Bundle, string Name, float Was, float Now);
-
 /// One clip to be replaced by another weapon's.
 /// <param name="Root">
 /// What the object carrying the target's own animation is called. A clip names what it moves from
@@ -26,21 +23,26 @@ public sealed record ClipMove(ClipAddress Into, ClipAddress From, string Root);
 public sealed record ClipMoved(
     string Bundle, string Name, float Was, float Now, string From, IReadOnlyList<string> Paths);
 
-/// Rewrites the timing of animation clips in the game's own bundles, and puts them back.
+/// Moves one weapon's motion onto another's clips in the game's own bundles, and puts them back.
 ///
-/// **This is a deliberate act and not something a `.pgmod` carries.** A pack carries the three types
-/// in `Replaceable`, and those three change what a thing looks and sounds like. A clip's length
-/// looks very much like something the game reads as behaviour — across 242 weapons the shots a
-/// second its own numbers imply land near one over the Shoot clip's length, median 0.90 — so a
-/// shorter clip is plausibly a faster weapon, and that reaches other players. Until somebody has
-/// watched the game and settled it, the way to change a length is this: from the command line, on a
-/// copy of the game, with the bundle backed up where the mod store keeps every other original.
+/// **Nothing here changes how long a clip lasts, and that is the whole point.** The game reads a
+/// clip's length as behaviour rather than as decoration, and behaviour reaches other players, which
+/// is the line `Replaceable` draws for everything else this tool writes. A borrowed motion is
+/// therefore fitted to the length the target already had (`ClipTiming.Stretch`, with the factor the
+/// target's own length asks for), which leaves the weapon behaving exactly as it did and changes
+/// only what it looks like doing it.
+///
+/// **It is not something a `.pgmod` carries.** A pack carries the three types in `Replaceable`, each
+/// as a file out of a workspace; a transplant carries no file at all, only "take that weapon's clip
+/// of this name", and that is a new shape of operation in a format other people's packs are now
+/// written in. So it stays a command-line act, with the bundle backed up where the mod store keeps
+/// every other original.
 ///
 /// It leaves no entry in the ledger, so `pgassettool verify` reports a bundle as modified by
-/// something else while a clip is retimed. That is honest — it was. `Restore` puts it back.
+/// something else while a motion is on loan. That is honest — it was. `Restore` puts it back.
 ///
-/// Written against the shipped bundle rather than the one in place, so retiming twice is measured
-/// from the game's own timing each time rather than from the last change.
+/// Written against the shipped bundle rather than the one in place, so moving a motion twice starts
+/// from the game's own data each time rather than from the last change.
 public sealed class ClipInstaller(GameInstallation game, ModStore store)
 {
     /// The copy of a bundle the game would actually load, and the hash it is recorded under.
@@ -81,60 +83,10 @@ public sealed class ClipInstaller(GameInstallation game, ModStore store)
         return found;
     }
 
-    /// Multiplies the length of each of these clips by `factor`, in whichever bundles they live in.
+    /// Puts another weapon's motion onto these clips, at the length they already have.
     ///
     /// Grouped by bundle, because one weapon's clips are all in one file and a bundle is rebuilt
     /// whole: six clips must cost one rebuild, not six.
-    public IReadOnlyList<ClipRetimed> Stretch(
-        IReadOnlyList<ClipAddress> clips, float factor, BundlePacking packing = BundlePacking.Smaller)
-    {
-        if (factor <= 0 || !float.IsFinite(factor)) throw new ArgumentOutOfRangeException(nameof(factor));
-        Refuse();
-
-        var done = new List<ClipRetimed>();
-
-        foreach (var group in clips.GroupBy(c => c.Bundle, StringComparer.OrdinalIgnoreCase))
-        {
-            var (cache, path, hash) = Live(group.Key);
-
-            // Backing up a bundle something else has already written would record that as the
-            // original. A bundle this has retimed before is the one exception: its backup is
-            // already the shipped file.
-            if (!store.HasBackup(cache, group.Key, hash) && !BundleIntegrity.IsPristine(path, hash))
-                throw new InvalidOperationException(
-                    $"'{group.Key}' has already been modified by something else and there is no backup "
-                    + "of it. Verify the game's files before retiming a clip in it.");
-
-            store.Backup(cache, group.Key, hash, path);
-            var original = store.OriginalOf(cache, group.Key, hash) ?? path;
-
-            var written = path + ".pgat-clips";
-            using (var editor = new BundleEditor(original))
-            {
-                foreach (var clip in group)
-                {
-                    var info = editor.File.file.GetAssetInfo(clip.PathId);
-                    if (info is null || info.TypeId != (int)AssetClassID.AnimationClip) continue;
-
-                    var field = editor.Read(info);
-                    if (field is null) continue;
-
-                    var was = Motion.Read(field)?.Length ?? 0f;
-                    var now = ClipTiming.Stretch(field, factor);
-                    editor.Stage(info, field);
-                    done.Add(new ClipRetimed(group.Key, clip.Name, was, now));
-                }
-
-                editor.Save(written, packing);
-            }
-
-            File.Move(written, path, overwrite: true);
-        }
-
-        return done;
-    }
-
-    /// Puts another weapon's motion onto these clips, at the length they already have.
     ///
     /// The whole object's contents are moved rather than its curves rebuilt, which is safe here and
     /// would not be in another engine: read across 318 of the game's clips, not one holds a pointer

@@ -11,14 +11,12 @@ namespace PGAssetTool.Core.Clips;
 /// to change; 422 clips were read and not one carries an animation event, so there are no event
 /// times to move either.
 ///
-/// Why this exists at all: the length is not only cosmetic. Across 242 weapons the shots a second
-/// the game's own numbers imply — its dps divided by its damage — lands near one over the Shoot
-/// clip's length, at a median of 0.90, and `WeaponSounds` has a field called
-/// `lengthShootFromPrefab`. So a shorter clip looks very much like a faster weapon, which is
-/// somebody else's problem as well as the author's: it reaches other players. Moving a motion from
-/// one weapon to another therefore keeps the target's own length (`Motion.Lasting`), and changing a
-/// length on purpose is a separate, deliberate act that does not go into a `.pgmod` — see
-/// ClipInstaller.
+/// **It is only ever called to fit a borrowed motion to the length the target clip already had**,
+/// because the game reads a clip's length as behaviour rather than as decoration, and behaviour is
+/// the line `Replaceable` draws for everything else this tool writes. So this is the arithmetic
+/// that keeps a transplant from changing how a weapon behaves, not a way to change one: the only
+/// caller is `ClipInstaller.Transplant`, and the only factor it is ever given is the one the
+/// target's own length asks for. Do not add a caller whose factor comes from anywhere else.
 public static class ClipTiming
 {
     /// Scales the times in a clip where it sits, and answers what it now lasts.

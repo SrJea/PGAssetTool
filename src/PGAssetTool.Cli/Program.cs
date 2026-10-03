@@ -39,13 +39,11 @@ if (command is "-h" or "--help" or "help")
                                the same name, each kept at the length it already had. --dry-run
                                says what that would do without doing it, which is worth reading
                                first: it names the parts the borrowed motion would drive and the
-                               ones it would stop driving.
-                               --stretch <factor> changes the lengths instead — 0.5 halves them —
-                               which the game reads as the rate of fire, so that one is for finding
-                               things out on a copy of the game rather than for playing with.
-                               Neither is a .pgmod and neither leaves an entry in the ledger; the
-                               bundle is backed up first and --restore puts it back. --clip <name>
-                               does one clip rather than all of them.
+                               ones it would stop driving. A clip's own length is never changed:
+                               the game reads that as the rate of fire.
+                               This is not a .pgmod and leaves no entry in the ledger; the bundle
+                               is backed up first and --restore puts it back. --clip <name> does
+                               one clip rather than all of them.
 
           extract <item>       Write out what can be changed of an item: images as PNG, audio as
                                WAV or Ogg, meshes as glTF. With --workspace, also writes a
@@ -546,8 +544,6 @@ if (command == "clips")
         }
     }
 
-    var stretch = Option("stretch");
-
     // The reader holds these bundles open and the writer may be about to replace them. Put it down
     // first: a write around a live reader fails with the file in use. The listing below comes from
     // the installer instead, which reads what the game would load rather than what shipped.
@@ -583,30 +579,14 @@ if (command == "clips")
             return 0;
         }
 
-        if (stretch is null && !args.Contains("--restore")) return 0;
         if (args.Contains("--restore"))
         {
             var back = installer.Restore(found.Select(c => c.Bundle));
             Console.WriteLine(back.Count == 0
                 ? "Nothing to put back: no original of those bundles is kept here."
                 : $"Back as the game shipped them: {string.Join(", ", back)}");
-            return 0;
         }
 
-        if (!float.TryParse(stretch, out var factor) || factor <= 0)
-        {
-            Console.Error.WriteLine("--stretch wants a number greater than zero: 0.5 halves a clip.");
-            return 2;
-        }
-
-        Console.WriteLine();
-        foreach (var done in installer.Stretch(
-                     found, factor, args.Contains("--fast") ? BundlePacking.Faster : BundlePacking.Smaller))
-            Console.WriteLine($"  {done.Name,-12} {done.Was,7:F3}s -> {done.Now,7:F3}s  @ {done.Bundle}");
-
-        Console.WriteLine("\n  This changes the game's own bundle and is not a .pgmod. The clip's length "
-            + "looks like something\n  the game reads as behaviour, so do this on a copy of the game. "
-            + "`--restore` puts it back.");
         return 0;
     }
     catch (Exception ex) when (ex is IOException or InvalidOperationException or InvalidDataException
