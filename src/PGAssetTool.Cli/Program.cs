@@ -435,12 +435,34 @@ var tree = new WeaponResolver(bundles, catalogs).Resolve(record);
 
 if (command == "clips")
 {
+    // Whether a curve actually moves what it is bound to, or only holds it where it is.
+    //
+    // Most of what a weapon's clips name, they pin: two keys of the same value, which puts the
+    // object somewhere and leaves it. Those curves are why "this would stop being animated" reads
+    // far worse than it is — nothing was being animated. Measured on Prototype, 42 of the 46 curves
+    // a transplant from Prototype S drops are of this kind. Anything that is not exactly constant
+    // counts as moving: the smallest real motion found is a rotation over 0.004, four thousand
+    // times the margin here, so there is no judgement to make.
+    static bool Moves(MotionCurve curve)
+    {
+        static float Spread(MotionCurve curve, Func<MotionKey, float> of)
+            => curve.Keys.Max(of) - curve.Keys.Min(of);
+
+        return Spread(curve, k => k.X) > 1e-6f || Spread(curve, k => k.Y) > 1e-6f
+            || Spread(curve, k => k.Z) > 1e-6f || Spread(curve, k => k.W) > 1e-6f;
+    }
+
     // Each clip, what it drives, and what it lasts. Read here, while the reader is still up.
-    (List<ClipAddress> Clips, string Root, HashSet<string> Drives) ClipsOf(WeaponTree of)
+    //
+    // What it drives is counted rather than listed, because a path's curves are spread over every
+    // clip and the question asked of them later — does this object move at all — is about all of
+    // them at once.
+    (List<ClipAddress> Clips, string Root, Dictionary<string, (int Curves, int Moving)> Drives)
+        ClipsOf(WeaponTree of)
     {
         var addresses = new List<ClipAddress>();
         var root = "";
-        var drives = new HashSet<string>(StringComparer.Ordinal);
+        var drives = new Dictionary<string, (int Curves, int Moving)>(StringComparer.Ordinal);
 
         foreach (var asset in of.PrefabAssets.Where(a => a.Class == AssetClassID.AnimationClip))
         {
@@ -453,7 +475,11 @@ if (command == "clips")
             addresses.Add(new ClipAddress(bundle, asset.PathId, asset.Name, motion?.Length ?? 0f));
 
             if (motion is null) continue;
-            foreach (var curve in motion.Curves) drives.Add(curve.Path);
+            foreach (var curve in motion.Curves)
+            {
+                var (curves, moving) = drives.GetValueOrDefault(curve.Path);
+                drives[curve.Path] = (curves + 1, moving + (Moves(curve) ? 1 : 0));
+            }
 
             // What this weapon's own curves hang from, which is what another weapon's motion has to
             // be hung from to drive anything here.
@@ -482,7 +508,7 @@ if (command == "clips")
 
     // The other weapon's motion, when one was named. Resolved before the reader goes down.
     List<ClipMove> moves = [];
-    IReadOnlySet<string> drives = new HashSet<string>(StringComparer.Ordinal);
+    IReadOnlyCollection<string> drives = [];
     if (Option("from") is { } donor)
     {
         if (catalogs.Find(donor) is not { } other)
@@ -501,7 +527,7 @@ if (command == "clips")
 
         // What this weapon's own clips drive, so that an object a borrowed motion names and this
         // rig has never heard of is said out loud rather than silently animating nothing.
-        drives = ownPaths;
+        drives = ownPaths.Keys;
 
         Console.WriteLine($"#{record.GameNumber}  {tree.DisplayName}   <- "
             + $"#{other.GameNumber} {catalogs.Localization.Translate(other.LocalizationKey) ?? other.Slug}");
@@ -525,19 +551,31 @@ if (command == "clips")
                         : ", which is what the motion already lasts"));
 
             // A curve on the root object itself names no path and is not an object to look for.
-            var borrowed = theirPaths
+            var borrowed = theirPaths.Keys
                 .Select(Rebound)
                 .Where(p => p.Length > 0)
                 .Distinct(StringComparer.Ordinal)
                 .ToList();
-            var strangers = borrowed.Where(p => p.Length > 0 && !ownPaths.Contains(p)).ToList();
+            var strangers = borrowed.Where(p => p.Length > 0 && !ownPaths.ContainsKey(p)).ToList();
 
             Console.WriteLine($"\n  {borrowed.Count - strangers.Count} of {borrowed.Count} objects it "
                 + $"animates are in this weapon's own rig, under '{ownRoot}'");
             foreach (var path in strangers)
                 Console.WriteLine($"    nothing here is called '{path}', so that curve would drive nothing");
-            foreach (var path in ownPaths.Where(p => p.Length > 0 && !borrowed.Contains(p, StringComparer.Ordinal)))
-                Console.WriteLine($"    '{path}' is animated now and would stop being");
+            // Which of these matters is the whole question, and it is not the count of them. A path
+            // whose every curve only holds a pose is driven now and loses nothing by not being;
+            // one with curves that move loses a motion somebody may be looking at. Said apart,
+            // because together they read as four things going wrong when one of them is.
+            var dropped = ownPaths
+                .Where(p => p.Key.Length > 0 && !borrowed.Contains(p.Key, StringComparer.Ordinal))
+                .ToList();
+
+            foreach (var (path, counted) in dropped.Where(p => p.Value.Moving > 0))
+                Console.WriteLine($"    '{path}' moves in {counted.Moving} of its {counted.Curves} "
+                    + "curves and would stop: that motion is lost");
+            foreach (var (path, counted) in dropped.Where(p => p.Value.Moving == 0))
+                Console.WriteLine($"    '{path}' is driven now, but all {counted.Curves} of its "
+                    + "curves only hold it still, so nothing is lost");
 
             Console.WriteLine("\n  Nothing was written. Run it again without --dry-run to do it.");
             return 0;
