@@ -35,6 +35,9 @@ public sealed record Motion(string Name, float Length, float SampleRate, IReadOn
         Gather(clip["m_RotationCurves"], MotionChannel.Rotation, 4, curves);
         Gather(clip["m_ScaleCurves"], MotionChannel.Scale, 3, curves);
 
+        // And the rotations a compressed clip keeps packed instead. See PackedCurve.
+        curves.AddRange(PackedCurve.Rotations(clip));
+
         if (curves.Count == 0) return null;
 
         var length = curves.SelectMany(c => c.Keys).Select(k => k.Time).DefaultIfEmpty(0f).Max();
@@ -116,7 +119,7 @@ public sealed record Motion(string Name, float Length, float SampleRate, IReadOn
     }
 
     /// One curve at one moment, between the keys either side of it.
-    private static (float X, float Y, float Z, float W) Sample(MotionCurve curve, float time)
+    public static (float X, float Y, float Z, float W) Sample(MotionCurve curve, float time)
     {
         var keys = curve.Keys;
         if (keys.Count == 1 || time <= keys[0].Time)

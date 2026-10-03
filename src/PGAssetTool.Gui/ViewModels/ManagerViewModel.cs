@@ -323,7 +323,8 @@ public sealed partial class ManagerViewModel : ObservableObject
     /// What a folder at this level is called, in the language the tool is set to.
     private string Heading(Core.Pack.PackSubject subject, int level) => level switch
     {
-        0 => subject.Kind,
+        // The kind as the picker in Browse names it, rather than the folder name it is filed under.
+        0 => Core.Catalog.ItemKinds.ByName(subject.Kind)?.Name ?? subject.Kind,
         1 => Named(subject) is { } name
             ? (subject.Number > 0 ? $"#{subject.Number} {name}" : name)
             : subject.Describe,

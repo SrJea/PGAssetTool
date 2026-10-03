@@ -20,14 +20,14 @@
 |---------|------|--------------------|
 | 武器      | ✅️   |                    |
 | 武器スキン   | ✅️   |                    |
-| ハット     | ⚠️   | CLIでのみ。非推奨かつサポートなし |
-| マスク     | ⚠️   | CLIでのみ。非推奨かつサポートなし |
-| アバター    | ⚠️   | CLIでのみ。非推奨かつサポートなし |
-| マント     | ⚠️   | CLIでのみ。非推奨かつサポートなし |
-| ブーツ     | ⚠️   | CLIでのみ。非推奨かつサポートなし |
-| グライダー   | ⚠️   | CLIでのみ。非推奨かつサポートなし |
-| 移動      | ⚠️   | CLIでのみ。非推奨かつサポートなし |
-| ペット     | ⚠️   | CLIでのみ。非推奨かつサポートなし |
+| ハット | ✅️ | スキンはアイテム自身のテクスチャで描かれるため、本体を編集すれば両方に反映されます |
+| マスク | ✅️ | ハットと同様 |
+| アバター | ✅️ |  |
+| マント | ✅️ | ハットと同様 |
+| ブーツ | ✅️ | ハットと同様 |
+| グライダー | ✅️ |  |
+| 移動 | ✅️ |  |
+| ペット | ✅️ |  |
 | ガジェット   | ❌️   | 将来的に対応予定           |
 | ボタン等UI  | ❌️   | 将来的に対応予定           |
 | ハットスキン  | ❌️   | 将来的に対応予定           |
@@ -69,8 +69,9 @@ WIP...
 
 ## 3つのタブ
 
-**Browse** - 武器の一覧と、選んだものが参照しているデータのツリーが表示されます。\
-ゲーム内ギャラリー番号, 各言語の武器名、内部武器番号での検索に対応しています。\
+**Browse** - 上の種別ピッカーで選んだ種類（武器・帽子・ケープ・マスク・ブーツ・ペット・グライダー・乗り物・アバター）の
+アイテム一覧と、選んだものが参照しているデータのツリーが表示されます。\
+武器はゲーム内ギャラリー番号、各言語の武器名、内部武器番号で、それ以外は名前か id で検索できます。\
 データのツリーでは`Ctrl+Shift+R`のショートカットを使用することで簡易モードになります。
 
 右側のタブではプレビューが表示されており、実際のモデルを確認したり関連スキンを表示できます。各アニメーションなども再生可能です。
@@ -78,7 +79,11 @@ WIP...
 **Editor** - 抽出したデータのワークスペースなどから各要素の比較などができます。
 左下のPack detailsから該当のワークスペースの詳細を変更できます。\
 一つ以上のデータを変更した状態でBuild packボタンを押すと、MODパックである`.pgmod`ファイルがワークスペースフォルダに作成されます。\
-Build and applyを使用することで、MODパックをワンクリックでインストールできます。
+Build and applyを使用することで、MODパックをワンクリックでインストールできます。\
+武器のアニメーションを選ぶと、ゲームのものとワークスペースのものを並べてモデル上で再生します。別のアイテムのアニメーション
+（番号か名前を入力し、クリップを選んでUse）や、Blenderで作ったものに差し替えられます。Write a .glb to editで全アニメーションと
+モデルを`animations/animations.glb`に書き出し、編集したものをUse a .glb（またはウィンドウへのドロップ）で戻します。
+Put the original backでどちらも元に戻せます。
 
 **Manager** - 導入したMODパックを管理できます。\
 MODのON/OFFが可能なTurn on/off\
@@ -101,7 +106,7 @@ MODのON/OFFが可能なTurn on/off\
 | --- | --- |
 | `Ctrl+1` `Ctrl+2` `Ctrl+3` | Browse / Editor / Manager |
 | `Ctrl+F` | そのタブの検索欄へ |
-| `Ctrl+E` | 選択中の武器を抽出 |
+| `Ctrl+E` | 選択中のアイテムを抽出 |
 | `Ctrl+O` | ワークスペースのフォルダを開く |
 | `Ctrl+Shift+E` | 選択中のアセットだけを抽出 |
 | `Shift+A` | 今見えている画像のアルファを表示 |
@@ -152,7 +157,7 @@ the game faster* は閲覧したバンドルを展開して置いておく量で
 
 ## コマンドライン
 
-GUI でできることは全部あります。実行ファイルは
+GUI でできることは、すべての種別について全部あります。実行ファイルは
 `src/PGAssetTool.Cli/bin/Release/net10.0-windows/win-x64/pgassettool.exe`、または：
 
 ```
@@ -163,16 +168,17 @@ dotnet run --project src/PGAssetTool.Cli -c Release -- <コマンド>
 | --- | --- |
 | `info` | 検出したインストールとバージョンを表示。 |
 | `weapons [<絞り込み>]` | 武器一覧。名前・内部番号・タグ・ギャラリー番号で絞れます。 |
-| `items [<種別>]` | 武器以外の種別 - 帽子・ケープ・マスク・ブーツ・ペット・グライダー・乗り物・アバター - の一覧、または指定した1種別の全件。 |
-| `show <アイテム>` | 1つのアイテムと、それが参照しているものすべて。武器はゲーム内番号（`819`）、プレハブ名（`Weapon1257`）、スラッグのどれでも。それ以外は `items` が出す id です。**ゲーム内番号とプレハブ番号は別の連番です。** |
+| `items [<種別>]` | 武器以外の種別 - 帽子・ケープ・マスク・ブーツ・ペット・グライダー・乗り物・アバター - の一覧、または指定した1種別の全件（`items hat` でも `items hats` でも可）。 |
+| `show <アイテム>` | 1つのアイテムと、それが参照しているものすべて。武器はゲーム内番号（`819`）、プレハブ名（`Weapon1257`）、スラッグのどれでも。それ以外は `items` が出す id です。どのアイテムも表示名そのもの（`"Aztec Power Hat"`）でも指定でき、近いものがあれば候補を表示します。**ゲーム内番号とプレハブ番号は別の連番です。** |
 | `extract <アイテム>` | アイテムに属するものを全部書き出し。`--workspace` を付けるとパック化できる `pgmod.json` も書きます。 |
 | `pack [<ディレクトリ>]` | ワークスペースから `.pgmod` をビルド。抽出以降に編集されたファイルだけが入ります。 |
-| `apply <パック>` | `.pgmod` をゲームに導入。 |
+| `apply <パック>...` | 1つ以上の `.pgmod` をゲームに導入（再構築は1回で済みます）。 |
 | `mods` | 導入済み一覧。 |
-| `enable <id>` / `disable <id>` | MODを有効化／アンインストールせずに無効化。 |
-| `remove <id>` | MODをアンインストール。 |
+| `enable <id>...` / `disable <id>...` | MODを有効化／アンインストールせずに無効化。 |
+| `remove <id>...` | MODをアンインストール。MODは id、id の先頭部分、または名前で指定できます（1つに決まる場合）。 |
 | `verify` | 全バンドルを、ゲームが記録したハッシュと照合。 |
 | `consolidate` | ダウンロード済みキャッシュを空にすると何が変わるかを報告。`--apply` は何も変わらないコピーだけを削除。 |
+| `animation <ディレクトリ> [<クリップ>]` | ワークスペースのアニメーション一覧、または1つを変更。`--from <アイテム>` でそのアイテムの同名アニメーション（または `--clip <名前>`）をこのアイテムのボーンに合わせて入れ、`--glb <ファイル>` で glTF のものを入れ、`--reset` で元に戻します。`--export` は全部をアイテムのモデルごと1つの `.glb` に書き出します。 |
 
 | オプション | 動作 |
 | --- | --- |
@@ -189,13 +195,45 @@ dotnet run --project src/PGAssetTool.Cli -c Release -- <コマンド>
 | `--rebuild` | 既に正しい内容が入っているバンドルも含めて全部作り直す。通常はそのまま残します。 |
 | `--low-memory` | バンドルを4つ同時ではなく1つずつ作り直す。約3割遅くなり、メモリのピークは約3割減ります。 |
 | `--read-memory <MB>` | `show` と `extract` がゲームのデータを展開してメモリに置いてよい量（既定 1024）。読み込みが数倍速くなります。`0` にすると全部ディスクから読みます。 |
+| `--from <アイテム>` | `animation` 用: アニメーションを使うアイテム。 |
+| `--clip <名前>` | `animation` 用: 同名でないときに使うアニメーション。 |
+| `--glb <ファイル>` | `animation` 用: アニメーションを取り出す `.glb`。差し替えるものと同じ名前のもの、または1つしかなければそれを使います。 |
+| `--anim <ファイル>` | `animation` 用: 使う `.anim`（別のワークスペースのものなど）。このアイテムのボーンに合わせます。Editorでアニメーションにドロップしても同じです。 |
+| `--take <名前>` | `animation` 用: 代わりに使う `.glb` 内のアニメーション。 |
+| `--export` | `animation` 用: ワークスペースのアニメーションを `animations/animations.glb`（または `--out <ファイル>`）に書き出す。 |
+| `--reset` | `animation` 用: アイテム本来のアニメーションに戻す。 |
+| `--version` | バージョンを表示。 |
+
+オプションはコマンドの前後どちらにも、`--名前 値` または `--名前=値` の形で書けます。知らないオプションは
+無視せず名前を挙げてエラーにします。空白を含む id（ゲームに1つあります: `avatar_ programmer`）は引用符で
+囲んでください。入力の誤りは終了コード `2`、それ以外のエラーは `1` で、一文で理由を表示します。想定外の
+エラーでは `PGAssetTool-data/logs` にクラッシュレポートも残します。
 
 ```
 pgassettool weapons crystal
 pgassettool extract 819 --workspace --out workspace
 pgassettool pack workspace/0819_something
 pgassettool apply workspace/0819_something/something.pgmod
+
+pgassettool items pets
+pgassettool extract pet_alien_cat --workspace
+pgassettool disable pet_alien_cat
+
+pgassettool animation workspace/0001_FirstPistol
+pgassettool animation workspace/0001_FirstPistol Reload --from 416
+pgassettool animation workspace/0001_FirstPistol --export
+pgassettool animation workspace/0001_FirstPistol Reload --glb edited.glb
 ```
+
+### Blenderでアニメーションを編集する
+
+1. `pgassettool animation <ワークスペース> --export`（またはEditorのWrite a .glb to edit）で
+   `animations/animations.glb` を書き出します。武器と腕がボーンに乗り、アニメーションごとに1つのアクションになっています。
+2. BlenderでFile › Import › glTF 2.0、変えたいアクションを選び、いつも通りボーンにキーを打ちます。
+3. File › Export › glTF 2.0で、glTF Binary（`.glb`）として既定の設定のまま書き出します。
+4. `pgassettool animation <ワークスペース> Reload --glb <そのファイル>`（またはUse a .glb）でReloadという名前のアクションを
+   戻します。ファイルから取り込むのは変更したカーブだけで、触れなかったものはゲーム本来のキーのまま残ります。何も変えずに
+   保存したファイルなら何も変わりません。
 
 ---
 
@@ -207,6 +245,7 @@ pgassettool apply workspace/0819_something/something.pgmod
 | テクスチャ | `.png` |
 | モデル | `.glb` |
 | 音声 | `.wav` `.mp3` `.ogg` |
+| 武器のアニメーション | 別アイテムのアニメーション、または `.glb`（Blender） |
 
 すべて一般的な編集ソフトで開くことができます。
 
@@ -220,11 +259,12 @@ pgassettool apply workspace/0819_something/something.pgmod
 
 ```
 dotnet test -c Release
-dotnet run --project src/PGAssetTool.Gui -c Release -- --self-test
+dotnet run --project src/PGAssetTool.Gui -c Release -- --self-test --game <ゲームのコピー>
 ```
 
 `dotnet test` はゲーム不要で、CI が回すものです。`--self-test` が本当の検査で、
-実際のインストールに対してツール全体を動かし、終わったら元に戻します。
+インストールに対してツール全体を動かし、終わったら元に戻します。MODの導入と削除を実際に行うので、
+`--game` でゲームのコピーを指定してください。指定しなければ、検出したインストールを使います。
 
 `classdata.tpk`（Unity のエンジンクラスデータベース）はコアアセンブリに埋め込まれています。
 `*_Data` 以下のファイルは TypeTree 無しでビルドされているため必要です（AssetBundle は自前で持っています）。

@@ -11,7 +11,8 @@ namespace PGAssetTool.Core.Pack;
 ///
 /// Nothing else goes back. An asset's raw serialized bytes (`.dat`) once did, for any class, along with
 /// assets added to a bundle; the user retired both until there is a design worth rebuilding them on. A
-/// pack is pictures, models and sounds, and nothing in it has to understand a class it cannot open.
+/// pack is pictures, models, sounds and animations, and nothing in it has to understand a class it
+/// cannot open.
 public static class Replaceable
 {
     private static readonly (AssetClassID Class, string Operation, string[] Formats)[] Kinds =
@@ -19,6 +20,7 @@ public static class Replaceable
         (AssetClassID.Texture2D, PackOperations.ReplaceTexture, ["png"]),
         (AssetClassID.Mesh, PackOperations.ReplaceMesh, ["glb"]),
         (AssetClassID.AudioClip, PackOperations.ReplaceAudio, ["wav", "mp3", "ogg"]),
+        (AssetClassID.AnimationClip, PackOperations.ReplaceAnimation, ["anim"]),
     ];
 
     /// The classes something can be written back to.
@@ -54,7 +56,7 @@ public static class Replaceable
         => Withheld.Contains(cls)
             ? $"'{what}' is a {cls}, which this tool does not write back. It changes how things look "
                 + "and sound; a component decides how they behave."
-            : $"'{what}' is a {cls}, and this tool writes back only textures, meshes and sounds.";
+            : $"'{what}' is a {cls}, and this tool writes back only textures, meshes, sounds and animations.";
 
     /// The operation to run for a file, by its extension without the dot.
     public static string? OperationForFormat(string format)

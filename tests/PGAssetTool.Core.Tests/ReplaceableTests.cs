@@ -44,13 +44,14 @@ public class ReplaceableTests
     public void EveryOperationTheApplierKnowsIsReachableFromSomeFormat()
     {
         // If an operation exists with no format mapping to it, nothing can ever produce one.
-        var reachable = new[] { "png", "glb", "wav", "mp3", "ogg" }
+        var reachable = new[] { "png", "glb", "wav", "mp3", "ogg", "anim" }
             .Select(Replaceable.OperationForFormat)
             .ToHashSet();
 
         Assert.Contains(PackOperations.ReplaceTexture, reachable);
         Assert.Contains(PackOperations.ReplaceMesh, reachable);
         Assert.Contains(PackOperations.ReplaceAudio, reachable);
+        Assert.Contains(PackOperations.ReplaceAnimation, reachable);
         Assert.Equal(Replaceable.Classes.Count, reachable.Count);
     }
 

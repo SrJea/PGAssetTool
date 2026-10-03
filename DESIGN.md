@@ -42,9 +42,8 @@ in it has a concept of a weapon.
 holding them, `IconResolver` finds the one picture that stands for an item. This layer answers
 "what exists, and where".
 
-**The shell** — the GUI and the CLI — puts the two together. The window offers weapons only, by one
-filter where it loads the catalogues; the other kinds are still read underneath, and the CLI lists
-them.
+**The shell** — the GUI and the CLI — puts the two together. Both offer every kind; the picker above the
+window's list chooses which registry the list is filled from, and nothing below it changes.
 
 Adding another kind of item is work in the middle layer. The layers below and above it already do
 what they would need to do.
@@ -83,6 +82,20 @@ chat icon and a skin's shop icon when it is filtered to what can be replaced. Be
 group went, on the strength of their being paths rather than objects — while an extract wrote them
 out and a pack replaced them.
 
+The item's own prefab is found the same way, and a search by name is only the fallback. A pet's
+bundle holds `Pets/Content/pet_alien_cat`, the model, and `Pets/Infos/pet_alien_cat`, a description of
+it, and both GameObjects are called `pet_alien_cat`; searched for by name, 50 of the 112 pets resolved
+to the description — a GameObject and a Transform, no model — and three weapons and eighteen vehicles
+to a part of themselves that reached less than the whole.
+
+### An item's related paths are the ones no other item claims
+
+Everything but a weapon finds its related assets by its id appearing in their names, ending where the
+name does or at an underscore. Nine ids in the game are another item's id and more — `pet_horse` and
+`pet_horse_figure`, `glider_dragon` and `glider_dragon_form`, `avatar_spec_ops` and three of its squad —
+and by that rule the shorter one collected the longer one's prefab and icons, which an extract wrote
+out and a pack could then replace. So a path a longer id also names is that item's.
+
 ---
 
 ## What can be written back
@@ -92,6 +105,7 @@ out and a pack replaced them.
 | `replaceTexture` | `.png` | `Texture2D` |
 | `replaceMesh` | `.glb` | `Mesh` |
 | `replaceAudio` | `.wav`, `.mp3`, `.ogg` | `AudioClip` |
+| `replaceAnimation` | `.anim` | `AnimationClip` |
 
 Each takes a file anybody can edit in an ordinary tool. `Replaceable` is the single registry of them,
 and a class earns a place in it only once the import path works end to end — listing one earlier
@@ -173,6 +187,59 @@ Four things about it that look arbitrary:
 - **It plays on the display's own frames, by the time that really passed between them.** A timer at
   thirty a second stepping a fixed thirtieth showed something new one frame in four on a 120Hz
   screen, and a slow frame put the clip behind the clock for good.
+
+### An animation goes back as its curves
+
+Every one of the 8,926 clips the weapons play is a legacy clip: position, rotation and scale curves
+bound by path, 213 of them with their rotations packed into `m_CompressedRotationCurves`
+(`PackedCurve` reads those), 33 with float curves and eight with events. So a workspace holds each
+clip as a `.anim` — the curves and nothing else, as JSON a person can read (`ClipFile`) — and
+`replaceAnimation` writes them back (`ClipImporter`): the three curve arrays rebuilt, the packed and
+Euler ones emptied, and everything that is not motion left as the game had it. The clip's name is
+what the game plays it by. Its events call into the game's code; their times are scaled with the
+clip's length, because #544's charge fires `OnAnimationFinished` at 3.0s and a one-second clip put
+in its place would otherwise never get there.
+
+What goes in is one of two things.
+
+**Another item's clip** (`AnimationSwap.Use`). A clip names what it moves by path from its Animation
+component, and every weapon's paths start with a name of its own, so `Retarget` matches them in
+turns: the same path; the same last name agreeing longest from the end, when only one does; what
+those matches say about the names in front; and an only child of something matched, one level down
+and only when the other clip's own model is known — that last is the gun's root under the hand,
+which every weapon calls something different. What is still unmatched is left out and said.
+
+**A glTF** (`AnimationGlb`), which is how Blender gets a say. Written out, it holds every object
+under the Animation component as a joint of one skin, the workspace's models bound to it where they
+stand at rest, and each clip as an animation of its name. Read back, the animation named like the
+slot is fitted the same way. The decisions in it that look arbitrary:
+
+- **Curves go out as straight lines, sampled on Blender's 24 frames a second.** glTF can say a
+  Unity curve exactly — a cubic with the slopes either side of each key — and Blender reads that by
+  keeping the keys and putting handles of its own where the slopes were. A weapon's motion is mostly
+  its slopes, so what Blender showed was not what the game plays. Straight lines it reads as they
+  are, and on its own frames every key lands on one.
+- **A curve that comes back unchanged keeps the game's keys.** Blender writes the animation back
+  sampled on the same frames, so a curve nobody touched comes back as exactly the numbers it went
+  out as; checked against the slot as it is, it is kept as it is rather than as the samples. A file
+  saved without an edit is the animation the slot already had, and nothing is written.
+- **Every object is a joint, and every animation holds what it leaves alone at rest.** One
+  armature and one action per clip, rather than loose empties with actions of their own; and a
+  Blender bone cannot keep a scale at rest, so `fx_sleeve`, which the game keeps at 0.95, stood at 1
+  in every action that did not say otherwise and went back out as a curve the clip never had. A
+  curve that only holds an object where it already stands is left out on the way back in — unless
+  the game's own clip has it, when pinning it is part of what the clip does.
+- **The models are bound where they stand.** The skinning matrix at rest is the bone where it
+  stands times its bind pose, whatever the bind poses were written against; the vertices are put
+  there and every joint's inverse bind matrix is the inverse of where it stands, so no bind pose of
+  the game's reaches another program to be got wrong. Checked vertex by vertex against Blender's own
+  evaluation, on #1, #943 and #1200: the same on every frame.
+- **The renderer under the animated object, where a mesh has several.** The shop's `_info` prefab
+  draws the same mesh on bones of its own, and the first renderer found was that one for #1200.
+- **Blender's names are read as Blender writes them.** Everything hangs under an `Armature` it adds,
+  so paths are counted from the object named like the one carrying the Animation component; a name
+  it has made unique with `.001` is read as the name it was; an action comes back called
+  `Reload_Armature` as often as `Reload`; and an animation that starts at frame 1 starts at 0 here.
 
 ### A workspace records what each model is drawn with
 
@@ -316,9 +383,9 @@ guessing would file some of them wrong.
 
 It is written at extraction, which is the only moment anything knows.
 
-The record is deliberately not weapon-shaped, though weapons are the only kind extraction makes
-today. Naming the parts generally cost nothing when it was done and saves moving every installed
-pack and every folder on disk later.
+The record was deliberately not weapon-shaped from the start, when weapons were the only kind
+extraction made. Naming the parts generally cost nothing then, and when the other kinds arrived no
+installed pack and no folder on disk had to move.
 
 The names are recorded *and* their translation keys are. The two answer different questions: the
 name is what it was called when the pack was made, which a pack handed to somebody has to be able to
@@ -401,6 +468,12 @@ nor rebuilt. Both halves have to hold, and anything else — a game update, an e
 record from a run that did not finish — falls through to restoring and reapplying. `ModApplier.Rebuild`
 turns the shortcut off, which is what the manager's *Reapply everything* is for. Turning one mod off
 then costs the bundles that mod is on rather than every bundle any mod is on.
+
+A bundle is written down only when every operation meant for it went in. The recipe is what was asked
+for, not what came out, so a bundle where one operation failed was recorded as holding that one too —
+and once whatever stopped it was put right, every later reconcile left the bundle alone as already
+correct. A glider's mesh the importer could not read stayed out of the game after the importer learned
+to read it.
 
 The ones that are rebuilt are rebuilt side by side, four at a time, largest first. They share
 nothing: different files, different backups, their own corner of the staging directory. The limit is
@@ -500,6 +573,17 @@ four components so the attribute fills a whole four-byte step, and 55 main meshe
 `UnityMesh` narrows position and normal to three as it reads them, because everything downstream
 takes three a vertex; left at four, #14 Battle Shovel and King's Crown shaded in alternating light and
 dark triangles, and the shovel was wrongly taken for a model whose normals disagree with its winding.
+
+**A `.glb` is written with its submeshes sharing one set of vertices, and read back the same way.**
+That is a Unity mesh: one vertex buffer, an index range per submesh. Read back a primitive at a time,
+each submesh brought its own copy of the vertices — #1200's Space Dessert, two submeshes over 2,779
+vertices, went into the game with 5,558 — so primitives naming the same accessors share them. Blender
+writes a set per primitive and comes through as it always did.
+
+**A value in a mesh that is not a number is written as one that is.** The game ships a few — two of
+avatar_gunslinger's normals are NaN — and the JSON half of a `.glb` cannot hold one, so the whole item
+failed to extract. A normal or tangent comes out as a unit vector, anything else as zero. Only POSITION
+is given bounds, as glTF asks; bounding every three-wide accessor is how the NaN reached the JSON.
 
 **The camera holds one rotation, not a yaw, a pitch and a roll.** It held three angles for a long
 time and that made it a turntable: sideways turned the model about one axis of its own whatever the

@@ -98,7 +98,12 @@ public sealed record WeaponTree(
     IconLocation? Icon,
     IReadOnlyList<string> UnresolvedReasons,
     IReadOnlyList<MeshTextures> MeshTextures,
-    AssetNode? MainMesh);
+    AssetNode? MainMesh)
+{
+    /// The path the game loads the prefab by, under whichever of its kind's roots it is actually
+    /// filed: `Weapons/Weapon834`, `Boots/BerserkBoots_up1`. Null for a tree made without one.
+    public string? PrefabPath { get; init; }
+}
 
 /// Assembles everything belonging to one weapon. Resolution happens on demand: the catalogs plus
 /// the single bundle holding the prefab are enough, so nothing is precomputed.
@@ -145,14 +150,8 @@ public sealed class WeaponResolver(BundleSet bundles, GameCatalogs catalogs)
         if (prefabBundle is not null)
         {
             var file = bundles.Open(prefabBundle);
-
-            // By the leaf of the path the lookup table actually matched, and without minding case.
-            // The registry's id and the prefab's own name are the same string for a weapon and only
-            // nearly for everything else: `BerserkBoots_Up1` is filed as `BerserkBoots_up1`, which
-            // the lookup finds and an exact search for the id does not.
             var named = prefabPath[(prefabPath.LastIndexOf('/') + 1)..];
-            var root = ReferenceWalker.FindByName(
-                bundles.Context, file, AssetClassID.GameObject, named, StringComparison.OrdinalIgnoreCase);
+            var root = Prefab(file, prefabBundle, prefabPath);
 
             if (root is null)
                 unresolved.Add($"'{named}' was not found inside bundle '{prefabBundle}'");
@@ -161,7 +160,7 @@ public sealed class WeaponResolver(BundleSet bundles, GameCatalogs catalogs)
                 // found exactly as before — a texture a component names is still a texture — and it
                 // is the object itself that does not appear. See Replaceable for which and why.
                 assets = ReferenceWalker
-                    .Closure(bundles.Context, file, root.PathId, Graph.Resolve, skip: Opaque)
+                    .Closure(bundles.Context, file, root.Value, Graph.Resolve, skip: Opaque)
                     .Where(a => Pack.Replaceable.CanShow(a.Class))
                     .ToList();
         }
@@ -195,7 +194,32 @@ public sealed class WeaponResolver(BundleSet bundles, GameCatalogs catalogs)
         return new WeaponTree(
             record, displayName ?? record.Slug, prefabBundle, assets, skins, related, icon, unresolved,
             dressing,
-            prefabBundle is null ? null : MainMesh(prefabBundle, assets, dressing, record.Slug, record.PrefabName));
+            prefabBundle is null ? null : MainMesh(prefabBundle, assets, dressing, record.Slug, record.PrefabName))
+        {
+            PrefabPath = prefabPath,
+        };
+    }
+
+    /// The GameObject the game loads for this path, as a path id.
+    ///
+    /// The bundle's own container table first, because a name is not unique inside a bundle: a
+    /// pet's bundle holds `Pets/Content/pet_alien_cat`, the model, and `Pets/Infos/pet_alien_cat`,
+    /// a description of it, and both GameObjects are called `pet_alien_cat`. Asked by name, the
+    /// walk started from whichever came first in the file — the description, for 50 of the 112
+    /// pets — and the pet came out as a GameObject and a Transform with no model at all.
+    ///
+    /// By the leaf of the path, without minding case, only when the table names nothing. The
+    /// registry's id and the prefab's own name are the same string for a weapon and only nearly
+    /// for everything else: `BerserkBoots_Up1` is filed as `BerserkBoots_up1`, which the lookup
+    /// finds and an exact search for the id does not.
+    private long? Prefab(AssetsFileInstance file, string bundle, string assetPath)
+    {
+        if (_contents.Locate(bundle, assetPath) is { Class: AssetClassID.GameObject } listed)
+            return listed.PathId;
+
+        var named = assetPath[(assetPath.LastIndexOf('/') + 1)..];
+        return ReferenceWalker.FindByName(
+            bundles.Context, file, AssetClassID.GameObject, named, StringComparison.OrdinalIgnoreCase)?.PathId;
     }
 
     /// Everything else the game files under this item's name.
@@ -212,11 +236,32 @@ public sealed class WeaponResolver(BundleSet bundles, GameCatalogs catalogs)
                 .Where(p => p != prefabPath
                     && !p.StartsWith("WeaponSkinsV2/WeaponSkinAssets/", StringComparison.Ordinal));
 
+        // Another item whose id is this one and more owns whatever names it. `pet_horse` and
+        // `pet_horse_figure` are two pets, and every path of the second one names the first as well
+        // by the rule below — so Parade Horse collected Knight Figure's prefab and icons, and a pack
+        // made from it could rewrite another item altogether. Nine items in the game have a
+        // neighbour like that: Evil Dragon and Dragon Form Glider, Block Car and Block Racer,
+        // Foundation Spec Ops and three of its squad.
+        var longer = OtherIds()
+            .Where(id => id.Length > record.Slug.Length
+                && id.Contains(record.Slug, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
         return catalogs.Lookup.Entries
             .Select(e => e.Key)
-            .Where(p => p != prefabPath && Names(p, record.Slug))
+            .Where(p => p != prefabPath && Names(p, record.Slug) && !longer.Any(id => Names(p, id)))
             .ToList();
     }
+
+    /// Every id the catalogue knows outside the weapons, once per resolver.
+    private IReadOnlyList<string> OtherIds()
+        => _otherIds ??= [.. catalogs.Kinds
+            .Where(k => k != ItemKinds.Weapon)
+            .SelectMany(k => catalogs.Of(k))
+            .Select(r => r.Slug)
+            .Distinct(StringComparer.OrdinalIgnoreCase)];
+
+    private IReadOnlyList<string>? _otherIds;
 
     /// A related path, with the object behind it when that object is one this tool writes back.
     ///

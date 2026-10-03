@@ -40,7 +40,8 @@ public static class GlbWriter
         {
             var values = Convert(mesh, attribute);
             if (values is null) continue;
-            attributes[name] = AddAccessor(buffer, views, accessors, values, size, Float);
+            attributes[name] = AddAccessor(
+                buffer, views, accessors, values, size, Float, bounded: attribute == VertexAttribute.Position);
         }
 
         if (mesh.IsSkinned)
@@ -140,8 +141,40 @@ public static class GlbWriter
                     result[v * target + 1] = 1f - result[v * target + 1];
                     break;
             }
+
+            Finite(result.AsSpan(v * target, target), attribute);
         }
         return result;
+    }
+
+    /// One vertex's value with anything that is not a number replaced by something that is.
+    ///
+    /// The game ships a handful of these — avatar_gunslinger's body has two vertices whose normals
+    /// are NaN — and a glTF reader is entitled to reject one, while the JSON half of the file cannot
+    /// hold one at all. A direction comes back as a whole unit vector rather than a part-zeroed one,
+    /// because a normal or tangent that is not unit length is as invalid as a NaN.
+    private static void Finite(Span<float> value, VertexAttribute attribute)
+    {
+        var bad = false;
+        foreach (var component in value) bad |= !float.IsFinite(component);
+        if (!bad) return;
+
+        switch (attribute)
+        {
+            case VertexAttribute.Normal:
+                value.Clear();
+                value[1] = 1f;
+                break;
+            case VertexAttribute.Tangent:
+                value.Clear();
+                value[0] = 1f;
+                value[3] = 1f;
+                break;
+            default:
+                for (var c = 0; c < value.Length; c++)
+                    if (!float.IsFinite(value[c])) value[c] = 0f;
+                break;
+        }
     }
 
     /// Most meshes here bind one bone per vertex with no weight channel at all, which glTF still
@@ -224,6 +257,10 @@ public static class GlbWriter
                 ? Sided(restPoses[i])
                 : InvertAffine(matrices.AsSpan(i * 16, 16));
 
+            // A joint written into the JSON has to be numbers, or the file is not written at all.
+            // Where it stands is then a guess, and the identity is the one that moves nothing.
+            if (placement.Any(v => !float.IsFinite(v))) placement = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
+
             joints.Add(nodes.Count);
             sceneNodes.Add(nodes.Count);
             nodes.Add(new JsonObject
@@ -295,15 +332,17 @@ public static class GlbWriter
 
     private static JsonNode AddAccessor(
         MemoryStream buffer, JsonArray views, JsonArray accessors,
-        float[] values, int components, int componentType, string? type = null)
+        float[] values, int components, int componentType, string? type = null, bool bounded = false)
     {
         var bytes = new byte[values.Length * 4];
         Buffer.BlockCopy(values, 0, bytes, 0, bytes.Length);
         var kind = type ?? components switch { 1 => "SCALAR", 2 => "VEC2", 3 => "VEC3", 4 => "VEC4", _ => "MAT4" };
         var index = AddRaw(buffer, views, accessors, bytes, values.Length / components, kind, componentType);
 
-        // POSITION is the one accessor glTF requires bounds on.
-        if (kind == "VEC3" && components == 3)
+        // POSITION is the one accessor glTF requires bounds on, and the only one given them. Asked
+        // of every three-wide accessor, it bounded the normals too — which is how a NaN normal
+        // reached the JSON and took the whole file down with it.
+        if (bounded)
         {
             var min = new float[3] { float.MaxValue, float.MaxValue, float.MaxValue };
             var max = new float[3] { float.MinValue, float.MinValue, float.MinValue };
@@ -360,7 +399,7 @@ public static class GlbWriter
         return accessors.Count - 1;
     }
 
-    private static void WriteContainer(string path, JsonObject gltf, byte[] binary)
+    internal static void WriteContainer(string path, JsonObject gltf, byte[] binary)
     {
         var json = Encoding.UTF8.GetBytes(gltf.ToJsonString(new JsonSerializerOptions { WriteIndented = false }));
         var jsonPadding = (4 - json.Length % 4) % 4;

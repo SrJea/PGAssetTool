@@ -9,6 +9,9 @@ public static class PackOperations
     public const string ReplaceTexture = "replaceTexture";
     public const string ReplaceMesh = "replaceMesh";
     public const string ReplaceAudio = "replaceAudio";
+
+    /// An AnimationClip's motion, from a `.anim` the workspace holds. See Animation.ClipFile.
+    public const string ReplaceAnimation = "replaceAnimation";
 }
 
 public sealed record PackOperation

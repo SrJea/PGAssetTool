@@ -31,7 +31,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     {
         Preview = new PreviewViewModel(_alpha);
         Preview.PropertyChanged += OnPreviewChanged;
-        Editor = new EditorViewModel(() => _bundles, _reading, _alpha);
+        Editor = new EditorViewModel(() => _bundles, _reading, _alpha) { Catalogs = () => _catalogs };
         Editor.PackRequested += BuildPack;
 
         Manager = new ManagerViewModel(() => _installation);
@@ -271,8 +271,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     /// registry the list is filled from and nothing else.
     public ObservableCollection<ItemKind> Kinds { get; } = [];
 
-    /// Whether there is more than one kind to choose between, which there is not for now — see
-    /// LoadAsync — so the picker stays out of the way until there is.
+    /// Whether there is more than one kind to choose between, so the picker stays out of the way of
+    /// a game that turns out to have nothing but weapons.
     public bool OffersKinds => Kinds.Count > 1;
 
     [ObservableProperty] private ItemKind _kind = ItemKinds.Weapon;
@@ -353,12 +353,11 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             // back by name: a reload rebuilds these objects, and the one held before it is not the
             // one in the list afterwards.
             var was = Kind.Name;
-            // Weapons only. The other kinds resolve, preview and extract the same way, but the user put
-            // them aside until weapons are finished, and offering them meant answering for them. The
-            // core still reads them and the command line still lists them; showing them again is this
-            // one filter.
+            // Every kind. They were held back to weapons alone while weapons were finished; the
+            // others resolve, preview, extract, pack and install through the same code, and the
+            // command line has been answering for them all along.
             Kinds.Clear();
-            foreach (var kind in _catalogs!.Kinds.Where(k => k == ItemKinds.Weapon)) Kinds.Add(kind);
+            foreach (var kind in _catalogs!.Kinds) Kinds.Add(kind);
             OnPropertyChanged(nameof(OffersKinds));
 
             // Put back quietly. Changing kinds by hand means "show me these instead", and takes the
@@ -392,7 +391,10 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                 CrashReport = crash;
                 CrashNotice = $"The last session closed unexpectedly. What happened is written in {Path.GetFileName(crash)} — sending that file with a report is what makes it fixable.";
             }
-            Status = $"{_catalogs.Items.Count} weapons";
+            var others = _catalogs.Kinds.Where(k => k != ItemKinds.Weapon).Sum(k => _catalogs.Of(k).Count);
+            Status = others > 0
+                ? $"{_catalogs.Items.Count} weapons, {others} other items in {_catalogs.Kinds.Count - 1} kinds"
+                : $"{_catalogs.Items.Count} weapons";
             OnPropertyChanged(nameof(GameDescribed));
         }
         catch (Exception ex)
@@ -408,7 +410,9 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     /// Re-reads the game from scratch, for after a game update or an external edit.
     public async Task ReloadAsync()
     {
-        var wanted = Selected?.Record.GameNumber;
+        // By kind and id rather than by number: only weapons are numbered, and every other item's
+        // number is the same nought, so a reload put the selection on the first hat in the list.
+        var wanted = Selected?.Record is { } record ? (record.Kind, record.Slug) : ((ItemKind, string)?)null;
 
         // Closed under the lock everything reads through. A preview or a resolve that is running
         // right now holds it and is reading the BundleSet on a thread of its own; disposing it from
@@ -432,8 +436,9 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         await LoadAsync();
 
         // Put the reader back where it was, so a reload is not also a loss of place.
-        if (wanted is { } number)
-            Selected = Weapons.FirstOrDefault(w => w.Record.GameNumber == number);
+        if (wanted is var (kind, slug))
+            Selected = Weapons.FirstOrDefault(w => w.Record.Kind == kind
+                && string.Equals(w.Record.Slug, slug, StringComparison.OrdinalIgnoreCase));
     }
 
     partial void OnSearchChanged(string value)
@@ -530,10 +535,10 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private async Task ExtractWeapon()
     {
-        if (_tree is null || _bundles is null) { Status = "Select a weapon first."; return; }
+        if (_tree is null || _bundles is null) { Status = "Select an item first."; return; }
 
         var tree = _tree;
-        await RunExclusively("extracting the weapon", async () =>
+        await RunExclusively($"extracting the {tree.Record.Kind.Name.ToLowerInvariant()}", async () =>
         {
             var version = GameVersion.Of(_bundles.Context, _bundles.Game);
 
@@ -925,12 +930,13 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     {
         if (_catalogs is not { } catalogs) return (null, null);
 
-        // Only weapons can be looked up, because weapons are the only kind anything here reads a
-        // catalogue for. Another kind falls through to the keys the pack recorded, which is the
-        // right answer until there is a catalogue to ask.
+        // A weapon by its number, anything else by the id the game knows it as — the id the pack
+        // was filed under, or failing that the prefab it was made from, which for everything but a
+        // weapon is the same string in its own capitals. The keys the pack recorded are the last
+        // resort, for an item this installation does not have.
         var record = subject.Kind == Core.Pack.PackKind.Weapon
             ? catalogs.Items.ByGameNumber(subject.Number)
-            : null;
+            : OtherNamed(catalogs, subject);
 
         var variant = record is null || subject.Variant.Length == 0
             ? null
@@ -942,6 +948,16 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
         string? Say(string? key)
             => key is { Length: > 0 } ? catalogs.Localization.Translate(key) : null;
+    }
+
+    /// An item that is not a weapon, by what a pack recorded of it.
+    private static WeaponRecord? OtherNamed(GameCatalogs catalogs, Core.Pack.PackSubject subject)
+    {
+        if (ItemKinds.ByName(subject.Kind) is not { } kind || kind == ItemKinds.Weapon) return null;
+
+        var of = catalogs.Of(kind);
+        return of.FirstOrDefault(r => string.Equals(r.Slug, subject.Prefab, StringComparison.OrdinalIgnoreCase))
+            ?? of.FirstOrDefault(r => string.Equals(r.Slug, subject.Id, StringComparison.OrdinalIgnoreCase));
     }
 
     private void Remember()

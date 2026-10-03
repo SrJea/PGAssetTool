@@ -55,9 +55,16 @@ public static class MeshImporter
         (VertexAttribute.BlendIndices, 4, UInt32Format),
     ];
 
-    public static MeshChange Replace(AssetTypeValueField field, UnityMesh mesh)
+    /// <param name="resource">
+    /// Reads the bundle's own stream entries, for a mesh that keeps its vertices there rather than
+    /// in the object. Only the original is read through it, and only to say what changed and to
+    /// line up the bones — but without it such a mesh could not be replaced at all: `glider_basic`,
+    /// which several gliders are built on, failed every pack that touched it.
+    /// </param>
+    public static MeshChange Replace(
+        AssetTypeValueField field, UnityMesh mesh, Func<string, long, long, byte[]?>? resource = null)
     {
-        var before = UnityMesh.Read(field);
+        var before = UnityMesh.Read(field, resource);
 
         if (!mesh.Attributes.ContainsKey(VertexAttribute.Position))
             throw new InvalidDataException("The replacement mesh has no positions.");

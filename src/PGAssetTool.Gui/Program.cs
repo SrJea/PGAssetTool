@@ -12,7 +12,14 @@ internal static class Program
         // A window cannot be looked at from a build, so --self-test brings the app up, waits for
         // the game to load, reports what the model holds and exits. It is the only way to know the
         // startup path works without a person sitting in front of it.
-        if (args.Contains("--self-test")) return SelfTest.Run();
+        //
+        // --game points it at an installation of its own choosing. It writes to whatever game it
+        // opens, and with nothing said that is the one Steam knows about — the one being played.
+        if (args.Contains("--self-test"))
+        {
+            var at = Array.IndexOf(args, "--game");
+            return SelfTest.Run(at >= 0 && at + 1 < args.Length ? args[at + 1] : null);
+        }
 
         // Whatever gets this far takes the window down, and until now took with it everything that
         // said why. The report is what somebody can be asked to send; the next start points at it.

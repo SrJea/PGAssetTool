@@ -192,7 +192,7 @@
          opened overwrite the value the model started with. -->
     <Menu DockPanel.Dock="Top">
       <MenuItem Header="_File">
-        <MenuItem Header="Extract _weapon" Command="{Binding ExtractWeaponCommand}"
+        <MenuItem Header="Extract _item" Command="{Binding ExtractWeaponCommand}"
                   InputGesture="Ctrl+E" />
         <MenuItem Header="Extract _selected asset" Command="{Binding ExtractSelectedCommand}"
                   InputGesture="Ctrl+Shift+E" />
@@ -278,7 +278,7 @@
             <!-- Which of the game's kinds the list is showing. Weapons are what this opens on and
                  what most of it is for; the rest of the game's cosmetics are the same arrangement
                  under other names, so the only thing that changes below is what is in the list.
-                 Hidden while weapons are the only kind offered. -->
+                 Hidden for a game with nothing but weapons in it. -->
             <ComboBox Name="Kinds" DockPanel.Dock="Top" ItemsSource="{Binding Kinds}"
                       SelectedItem="{Binding Kind}" HorizontalAlignment="Stretch" Margin="0,0,0,6"
                       IsVisible="{Binding OffersKinds}" />
@@ -287,8 +287,10 @@
             <ListBox Name="Weapons" ItemsSource="{Binding Weapons}" SelectedItem="{Binding Selected}">
               <ListBox.ItemTemplate>
                 <DataTemplate x:DataType="vm:WeaponListItem">
-                  <Grid ColumnDefinitions="52,*" Margin="0,2">
-                    <TextBlock Grid.Column="0" Text="{Binding Number}" Classes="dim mono"
+                  <!-- The number's column is as wide as the number: only weapons have one, and a
+                       fixed width left every hat's name indented past an empty column. -->
+                  <Grid ColumnDefinitions="Auto,*" Margin="0,2">
+                    <TextBlock Grid.Column="0" Text="{Binding Number}" Classes="dim mono" MinWidth="52"
                                VerticalAlignment="Center" IsVisible="{Binding IsNumbered}" />
                     <StackPanel Grid.Column="1">
                       <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
@@ -490,6 +492,38 @@
               <Button Content="Use this view as the icon" Click="OnCaptureIcon"
                       IsVisible="{Binding Shown.HasMesh}" />
             </StackPanel>
+
+            <!-- An animation is replaced by another of the game's own: whose, and which of
+                 theirs. Typed rather than picked from a list of fifteen hundred weapons, the same
+                 way the browse list is searched. -->
+            <Border DockPanel.Dock="Top" IsVisible="{Binding IsAnimation}" Background="#18181b"
+                    CornerRadius="4" Padding="10" Margin="0,0,0,8">
+              <StackPanel Spacing="6">
+                <TextBlock Text="{Binding AnimationSays}" TextWrapping="Wrap" />
+                <Grid ColumnDefinitions="Auto,8,180,8,*,8,Auto,8,Auto">
+                  <TextBlock Grid.Column="0" Text="Use the animation of" VerticalAlignment="Center" />
+                  <TextBox Grid.Column="2" Text="{Binding FromQuery}" Watermark="number, name or id"
+                           ToolTip.Tip="Any item: a weapon's number or any of its names, or another item's id or name." />
+                  <ComboBox Grid.Column="4" ItemsSource="{Binding FromClips}" SelectedItem="{Binding FromClip}"
+                            HorizontalAlignment="Stretch" />
+                  <Button Grid.Column="6" Content="Use" Command="{Binding UseAnimationCommand}"
+                          ToolTip.Tip="Puts that animation in place of this one, fitted to this item's bones. The file changes, so the next pack carries it." />
+                  <Button Grid.Column="8" Content="Put the original back" Command="{Binding RestoreAnimationCommand}" />
+                </Grid>
+                <TextBlock Text="{Binding FromFound}" Classes="dim" />
+                <!-- An animation made somewhere else: Blender, mostly. Written out with the item's
+                     models on its bones, and read back by the name of the clip it is for. -->
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                  <Button Content="Write a .glb to edit" Command="{Binding ExportAnimationsCommand}"
+                          ToolTip.Tip="Writes every animation of this workspace, with the item's models on the bones they move, into animations/animations.glb — to open in Blender." />
+                  <Button Content="Use a .glb…" Command="{Binding UseGlbCommand}"
+                          ToolTip.Tip="Puts in an animation from a glTF Binary file: the one named like this animation, or the only one there is. Dropping a .glb on the window does the same." />
+                  <ComboBox ItemsSource="{Binding GlbTakes}" SelectedItem="{Binding GlbTake}"
+                            IsVisible="{Binding HasGlbTakes}" MinWidth="160"
+                            ToolTip.Tip="The file's other animations. Choosing one puts it in instead." />
+                </StackPanel>
+              </StackPanel>
+            </Border>
 
             <!-- Stacked, not side by side: textures here are square far more often than not, and
                  the pane is taller than it is wide, so two squares across each get half the room. -->

@@ -85,6 +85,25 @@ public class ModStoreTests : IDisposable
     }
 
     [Fact]
+    public void ABackupSaysWhatItHoldsEvenWhenItsNameDoesNot()
+    {
+        // Filed under "aaa", holding something whose MD5 is not that: a bundle somebody else had
+        // already modified. Asked by name, a live copy identical to it never matched.
+        var live = WriteLiveBundle("woi_0", "aaa", "modified before this tool came");
+        _store.Backup(CacheKind.Shipped, "woi_0", "aaa", live);
+
+        var md5 = BundleIntegrity.Md5(live);
+        Assert.Equal(md5, _store.BackupMd5(CacheKind.Shipped, "woi_0", "aaa"));
+        // Kept, and the kept answer is the one given the second time.
+        Assert.True(File.Exists(_store.BackupPathFor(CacheKind.Shipped, "woi_0", "aaa") + ".md5"));
+        Assert.Equal(md5, _store.BackupMd5(CacheKind.Shipped, "woi_0", "aaa"));
+        // And the note beside the backup is not taken for another backup.
+        Assert.Single(_store.BackedUp());
+
+        Assert.Null(_store.BackupMd5(CacheKind.Shipped, "woi_0", "bbb"));
+    }
+
+    [Fact]
     public void RestoringWithoutABackupSaysSo()
     {
         var live = WriteLiveBundle("woi_0", "aaa", "original");

@@ -31,25 +31,41 @@ public static class GltfMeshReader
         var subMeshes = new List<SubMesh>();
         var vertexCount = 0;
 
+        // Where each set of vertex accessors already went, so primitives that share one share it
+        // here too. A Unity mesh is one vertex buffer with several index ranges over it, and that is
+        // how this tool writes one out: every submesh names the same accessors. Read back a
+        // primitive at a time, each brought its own copy — #1200's Space Dessert, two submeshes over
+        // 2,779 vertices, went back into the game with 5,558, and every further round trip doubled
+        // it again. Blender writes a separate set per primitive, which comes through as before.
+        var placed = new Dictionary<string, (int Base, int Count)>(StringComparer.Ordinal);
+
         foreach (var primitive in primitives)
         {
             var slot = primitive.GetProperty("attributes");
-            var added = AppendVertices(file, slot, attributes, dimensions);
+            var signature = string.Join(";", slot.EnumerateObject()
+                .OrderBy(a => a.Name, StringComparer.Ordinal)
+                .Select(a => $"{a.Name}={a.Value.GetRawText()}"));
+
+            if (!placed.TryGetValue(signature, out var vertices))
+            {
+                vertices = (vertexCount, AppendVertices(file, slot, attributes, dimensions));
+                placed[signature] = vertices;
+                vertexCount += vertices.Count;
+            }
 
             var start = indices.Count;
             var local = primitive.TryGetProperty("indices", out var accessor)
                 ? file.ReadIndices(accessor.GetInt32())
-                : Enumerable.Range(0, added).ToArray();
+                : Enumerable.Range(0, vertices.Count).ToArray();
 
             // Reversed on the way in for the same reason it was reversed on the way out.
             for (int i = 0; i + 2 < local.Length; i += 3)
             {
-                indices.Add(local[i + 2] + vertexCount);
-                indices.Add(local[i + 1] + vertexCount);
-                indices.Add(local[i] + vertexCount);
+                indices.Add(local[i + 2] + vertices.Base);
+                indices.Add(local[i + 1] + vertices.Base);
+                indices.Add(local[i] + vertices.Base);
             }
             subMeshes.Add(new SubMesh(start, indices.Count - start, Topology: 0, BaseVertex: 0));
-            vertexCount += added;
         }
 
         var name = meshNode.TryGetProperty("name", out var n) ? n.GetString()! : "mesh";
