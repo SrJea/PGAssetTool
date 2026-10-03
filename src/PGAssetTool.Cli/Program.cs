@@ -128,6 +128,8 @@ static int Run(CommandLine line)
                                    its own materials and textures, and the model it brings if it brings
                                    one. `show` lists what a weapon has. Hats, capes, masks and boots
                                    draw their skins with their own textures, so they need none.
+              --all-skins          With extract: write the item as it comes and every one of its skins,
+                                   each into a workspace of its own.
               --protect            Sign the built pack with a key kept beside the tool, and keep it from
                                    opening as a zip. Whoever alters one afterwards shows up as having
                                    done so. It stops a casual look inside and nothing more.
@@ -730,6 +732,42 @@ static int Extract(
     }
 
     var outputRoot = Path.GetFullPath(line.Option("out") ?? Path.Combine(Directory.GetCurrentDirectory(), "workspace"));
+
+    // Every look at once: the item as it comes and each skin, a workspace apiece, since one pack is
+    // one look. Always as workspaces — a skin written out with no manifest could never be packed.
+    if (line.Has("all-skins"))
+    {
+        if (line.Option("skin") is { Length: > 0 })
+            throw new CommandLineException("--all-skins writes every skin; --skin names one. Ask for one or the other.");
+
+        Console.WriteLine(Heading(record, tree));
+        if (tree.Skins.Count == 0)
+            Console.WriteLine("  It has no skins of its own"
+                + (record.Kind == ItemKinds.Weapon ? "; writing it as it comes." : ": its skin is drawn with its own textures, so this covers both."));
+
+        var looks = WeaponExporter.ExportEveryLook(
+            bundles, tree, outputRoot, line.Option("author") ?? "", GameVersion.Of(bundles.Context, game),
+            opaque: line.Has("opaque"), maskUnused: !line.Has("whole"),
+            progress: (at, of, name) => Console.Error.WriteLine($"  [{at}/{of}] {name}"));
+
+        foreach (var look in looks.Where(l => l.Export is not null))
+        {
+            var count = look.Export!.Assets.Select(a => a.Path).Distinct(StringComparer.OrdinalIgnoreCase).Count();
+            Console.WriteLine($"  {TextColumn.Pad(look.Skin is null ? "as it comes" : look.Name, 40)} {count,4} files  -> {look.Export.Directory}");
+        }
+        // Said once for every look it stopped: a bundle they share stops all of them the same way.
+        foreach (var reason in looks.Where(l => l.Export is null).GroupBy(l => l.Failed))
+            Console.WriteLine($"  Not written — {string.Join(", ", reason.Select(l => l.Skin is null ? "as it comes" : l.Name))}: {reason.Key}");
+
+        var failed = looks.Count(l => l.Export is null);
+        Console.WriteLine();
+        Console.WriteLine($"  {looks.Count - failed} of {looks.Count} written, each a workspace of its own: edit one, then "
+            + "`pgassettool pack <its folder>`.");
+        Console.Error.WriteLine();
+        Console.Error.WriteLine($"total {timer.ElapsedMilliseconds}ms");
+        return failed == looks.Count ? 1 : 0;
+    }
+
     var exporter = new WeaponExporter(bundles)
     {
         Opaque = line.Has("opaque"),

@@ -538,6 +538,12 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         if (_tree is null || _bundles is null) { Status = "Select an item first."; return; }
 
         var tree = _tree;
+        if (ReferenceEquals(ChosenSkin, SkinChoice.All))
+        {
+            await ExtractEveryLook(tree);
+            return;
+        }
+
         await RunExclusively($"extracting the {tree.Record.Kind.Name.ToLowerInvariant()}", async () =>
         {
             var version = GameVersion.Of(_bundles.Context, _bundles.Game);
@@ -558,6 +564,35 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             Status = $"{export.Assets.Select(a => a.Path).Distinct(StringComparer.OrdinalIgnoreCase).Count()} files written to {export.Directory}"
                 + (export.Skipped.Count > 0 ? $", {export.Skipped.Count} skipped" : "")
                 + (export.Notes is { Count: > 0 } notes ? ".  " + string.Join("  ", notes) : "");
+        });
+    }
+
+    /// Writes the item as it comes and then each of its skins, a workspace apiece. See
+    /// WeaponExporter.ExportEveryLook.
+    private async Task ExtractEveryLook(WeaponTree tree)
+    {
+        await RunExclusively($"extracting the {tree.Record.Kind.Name.ToLowerInvariant()} and its skins", async () =>
+        {
+            var version = GameVersion.Of(_bundles!.Context, _bundles.Game);
+            // Made here, so what it reports arrives on the window's thread.
+            var progress = new Progress<string>(said => Status = said);
+            IProgress<string> report = progress;
+
+            var looks = await Task.Run(() => WeaponExporter.ExportEveryLook(
+                _bundles, tree, WorkspaceRoot, _settings.Author, version,
+                opaque: _settings.OpaqueTextures, maskUnused: _settings.MaskUnusedTextures,
+                progress: (at, of, name) => report.Report($"Extracting {at} of {of}: {name}…")));
+
+            if (looks.LastOrDefault(l => l.Export is not null)?.Export is { } last) LastExport = last.Directory;
+            Editor.Rescan(WorkspaceRoot);
+            Manager.Refresh();
+
+            var failed = looks.Where(l => l.Export is null).ToList();
+            Status = $"{looks.Count - failed.Count} of {looks.Count} written, each a workspace of its own, in {WorkspaceRoot}"
+                + (failed.Count > 0
+                    ? ". Not written: " + string.Join("; ", failed.GroupBy(f => f.Failed)
+                        .Select(g => $"{string.Join(", ", g.Select(f => f.Name))} ({g.Key})"))
+                    : ".");
         });
     }
 
@@ -1195,6 +1230,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     {
         SkinChoices.Clear();
         SkinChoices.Add(SkinChoice.None);
+        if (tree?.Skins.Count > 0) SkinChoices.Add(SkinChoice.All);
         foreach (var skin in tree?.Skins ?? [])
             SkinChoices.Add(new SkinChoice(
                 skin.Record.Id, skin.DisplayName ?? skin.Record.Id, skin.Model is not null));
@@ -1602,6 +1638,9 @@ public sealed record LanguageOption(string Bundle, string Name)
 public sealed record SkinChoice(string? Id, string Name, bool HasModel)
 {
     public static SkinChoice None { get; } = new(null, "(no skin)", false);
+
+    /// The item as it comes and every skin, each into a workspace of its own.
+    public static SkinChoice All { get; } = new(null, "(all of them, each a workspace of its own)", false);
 
     public override string ToString() => HasModel ? $"{Name}  — its own model" : Name;
 }

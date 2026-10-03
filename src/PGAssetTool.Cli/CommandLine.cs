@@ -27,7 +27,7 @@ public sealed class CommandLine
     public static readonly IReadOnlySet<string> Flags = new HashSet<string>(StringComparer.Ordinal)
     {
         "workspace", "force", "fast", "rebuild", "low-memory", "opaque", "whole", "protect", "apply",
-        "help", "version", "reset", "export",
+        "help", "version", "reset", "export", "all-skins",
     };
 
     private readonly Dictionary<string, string> _options;

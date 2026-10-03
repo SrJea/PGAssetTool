@@ -66,7 +66,8 @@ dotnet publish src/PGAssetTool.Gui -c Release -o dist
 1. **Extract the item.** In **Browse**, pick the kind and the item, then press Extract (`Ctrl+E`). Its files are
    written into a workspace folder under `PGAssetTool-data/workspace` (`Ctrl+O` opens it): `textures/` (`.png`),
    `meshes/` (`.glb`), `audio/` and, for weapons, `animations/`, beside a `pgmod.json` that says which file
-   replaces what.
+   replaces what. To write a weapon's skins too, choose one in *Extract with skin* — or *all of them*, which writes
+   the weapon and every skin, each into a workspace of its own (`--all-skins` on the command line).
 2. **Edit the files you want to change**, in the program you would use anyway: an image editor for the
    textures, Blender for the models, any sound editor for the sounds. Save over the file with the same name, or
    drop the edited file onto the tool's window and it goes in its place. Animations are changed in the Editor
@@ -204,6 +205,7 @@ dotnet run --project src/PGAssetTool.Cli -c Release -- <command>
 | `--out <directory>` | Where output goes. `extract` defaults to `./workspace`. |
 | `--author <name>` | Recorded in the manifest. |
 | `--skin <id or name>` | Write out one of the weapon's skins instead of the weapon as it comes. `show` lists what there is. |
+| `--all-skins` | With `extract`: write the weapon as it comes and every one of its skins, each into a workspace of its own. |
 | `--opaque` | Write textures with no alpha channel. Some weapons use transparency, so if your image editor is not good at editing alpha, try this. |
 | `--whole` | Write the whole of every texture. By default **the part no model uses is made transparent**, leaving only what is actually seen. |
 | `--protect` | Sign the built pack, and keep it from opening as a zip. |

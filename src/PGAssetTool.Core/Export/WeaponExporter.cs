@@ -764,6 +764,53 @@ public sealed class WeaponExporter(BundleSet bundles)
         return export;
     }
 
+    /// One look of an item written out: the item as it comes (`Skin` null) or one of its skins.
+    /// <param name="Failed">Why it was not written, where it was not; the others go on regardless.</param>
+    public sealed record LookExport(string? Skin, string Name, WeaponExport? Export, string? Failed);
+
+    /// The item as it comes and then every one of its skins, each into a workspace of its own —
+    /// except the default skin, which the item as it comes already covers.
+    ///
+    /// One workspace per look, because one pack is one look: the mod a skin's workspace builds
+    /// replaces that skin and nothing else, and is turned on and off apart from the others. Each
+    /// gets the folder a single extraction of it would, so asking for all of them is the same as
+    /// asking for each in turn. One that cannot be written — a bundle changed by something else, a
+    /// skin whose model is missing — is said and skipped, and the rest are still written.
+    /// <param name="opaque">As `Opaque`, for every look.</param>
+    /// <param name="maskUnused">As `MaskUnused`, for every look.</param>
+    /// <param name="progress">Told before each look: which one, of how many, and its name.</param>
+    public static IReadOnlyList<LookExport> ExportEveryLook(
+        Assets.BundleSet bundles, WeaponTree tree, string outputRoot, string author, string? gameVersion,
+        bool opaque = false, bool maskUnused = true, Action<int, int, string>? progress = null)
+    {
+        // Not the default skin: the item as it comes already writes into it — the two default looks
+        // are painted as one (see "A weapon's paint reaches its default skin" in DESIGN.md) — and a
+        // second workspace for it would build a second mod of the same pictures.
+        var looks = new List<(string? Id, string Name)> { (null, tree.DisplayName) };
+        looks.AddRange(tree.Skins
+            .Where(s => !string.Equals(s.Record.Id, tree.Record.PrefabName + "_default", StringComparison.OrdinalIgnoreCase))
+            .Select(s => ((string?)s.Record.Id, s.DisplayName ?? s.Record.Id)));
+
+        var written = new List<LookExport>();
+        for (var at = 0; at < looks.Count; at++)
+        {
+            var (id, name) = looks[at];
+            progress?.Invoke(at + 1, looks.Count, name);
+
+            var exporter = new WeaponExporter(bundles) { Opaque = opaque, MaskUnused = maskUnused, Skin = id };
+            try
+            {
+                written.Add(new LookExport(id, name, exporter.ExportAsWorkspace(tree, outputRoot, author, gameVersion), null));
+            }
+            catch (Exception e) when (e is AlteredBundlesException or IOException or InvalidOperationException
+                                          or KeyNotFoundException or NotSupportedException or UnauthorizedAccessException)
+            {
+                written.Add(new LookExport(id, name, null, e.Message));
+            }
+        }
+        return written;
+    }
+
     /// What the tool will know this mod by, for as long as it exists.
     ///
     /// A name and a number would not do it. The id was the weapon's slug alone, so every mod of a
