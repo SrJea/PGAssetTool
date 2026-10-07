@@ -1,0 +1,36 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:PGAssetTool.Gui.ViewModels"
+        xmlns:export="using:PGAssetTool.Core.Export"
+        x:Class="PGAssetTool.Gui.Views.MapsWindow"
+        x:DataType="vm:MainViewModel"
+        Title="Export a map" Icon="/Assets/pgat.ico" Width="520" Height="560"
+        WindowStartupLocation="CenterOwner">
+
+  <!-- Scaled with the rest of the tool. -->
+  <LayoutTransformControl>
+    <LayoutTransformControl.LayoutTransform>
+      <ScaleTransform ScaleX="{Binding Zoom}" ScaleY="{Binding Zoom}" />
+    </LayoutTransformControl.LayoutTransform>
+
+    <DockPanel Margin="16">
+      <TextBox DockPanel.Dock="Top" Text="{Binding MapFilter}" Watermark="Part of the map's name"
+               Margin="0,0,0,8" Name="Filter" />
+
+      <DockPanel DockPanel.Dock="Bottom" Margin="0,10,0,0">
+        <Button DockPanel.Dock="Right" Content="Close" Click="OnClose" IsCancel="True" Margin="8,0,0,0" />
+        <Button DockPanel.Dock="Right" Content="Export" Command="{Binding ExportMapCommand}" IsDefault="True"
+                ToolTip.Tip="Writes the map as one .glb — every mesh where it stands, with its pictures — into the maps folder beside the workspaces, and shows it." />
+        <TextBlock Text="{Binding MapSays}" TextWrapping="Wrap" Opacity="0.7" VerticalAlignment="Center" />
+      </DockPanel>
+
+      <ListBox ItemsSource="{Binding Maps}" SelectedItem="{Binding SelectedMap}">
+        <ListBox.ItemTemplate>
+          <DataTemplate x:DataType="export:MapExporter+Map">
+            <TextBlock Text="{Binding Name}" />
+          </DataTemplate>
+        </ListBox.ItemTemplate>
+      </ListBox>
+    </DockPanel>
+  </LayoutTransformControl>
+</Window>

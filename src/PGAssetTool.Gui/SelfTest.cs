@@ -969,6 +969,7 @@ internal static class SelfTest
             if (TheEditorPutsTheModelInItsPaint(model) is { } paintProblem) return Fail(paintProblem);
             if (AnimationsCanBeTakenFromAnotherWeapon(model) is { } animationProblem) return Fail(animationProblem);
             if (AnimationsGoOutAsAGlbAndComeBack(model) is { } glbProblem) return Fail(glbProblem);
+            if (AMapGoesOutAsAGlb(model) is { } mapProblem) return Fail(mapProblem);
             if (OneMeshCanWearTwoPictures(model, model.WorkspaceRoot) is { } twoPaints) return Fail(twoPaints);
 
             var texture = model.Editor.Files.FirstOrDefault(f => f.Name.EndsWith(".png"));
@@ -4267,6 +4268,30 @@ internal static class SelfTest
         return before.AsSpan().SequenceEqual(File.ReadAllBytes(reload.FullPath))
             ? null
             : "putting the Reload back after the glb did not write the file the extract wrote";
+    }
+
+    /// One of the game's maps written out through the window's own list: found by typing part of
+    /// its name, written into the maps folder, and holding something — a glTF with nodes in it.
+    private static string? AMapGoesOutAsAGlb(MainViewModel model)
+    {
+        model.LoadMaps();
+        Console.WriteLine($"map      {model.MapSays}");
+        if (model.Maps.Count < 100) return $"the map list holds {model.Maps.Count} maps";
+
+        model.MapFilter = "arena";
+        if (model.SelectedMap?.Name != "arena") return $"typing arena chose '{model.SelectedMap?.Name}'";
+
+        string? shown = null;
+        model.Editor.ShowFile = path => shown = path;
+        Settle(model.ExportMapCommand.ExecuteAsync(null), "writing out a map");
+        Console.WriteLine($"map      {model.MapSays}");
+        if (shown is null || !File.Exists(shown)) return $"writing the map wrote nothing: {model.MapSays}";
+
+        var bytes = File.ReadAllBytes(shown);
+        var json = System.Text.Encoding.UTF8.GetString(bytes, 20, BitConverter.ToInt32(bytes, 12));
+        var nodes = System.Text.Json.JsonDocument.Parse(json).RootElement.GetProperty("nodes").GetArrayLength();
+        File.Delete(shown);
+        return nodes > 10 ? null : $"the map's glb holds {nodes} nodes";
     }
 
     private static bool Shows(MainViewModel model, Core.Pack.WorkspaceFile file)

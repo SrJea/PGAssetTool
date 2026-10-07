@@ -389,5 +389,12 @@ public partial class MainWindow : Window
     private void OnOptions(object? sender, RoutedEventArgs e)
         => new OptionsWindow { DataContext = DataContext }.ShowDialog(this);
 
+    private void OnMaps(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not MainViewModel model) return;
+        model.LoadMaps();
+        new MapsWindow { DataContext = model }.ShowDialog(this);
+    }
+
     private void OnExit(object? sender, RoutedEventArgs e) => Close();
 }

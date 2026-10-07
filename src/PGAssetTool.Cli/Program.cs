@@ -88,6 +88,9 @@ static int Run(CommandLine line)
                                    made in Blender or anywhere else; --reset puts the original back.
                                    --export writes them all with the item's models into one .glb
                                    (animations/animations.glb, or --out) to edit in Blender.
+              maps [<filter>]      List the game's maps.
+              map <name>           Write a map out as one .glb — every mesh where it stands, with its
+                                   pictures — to maps/<name>.glb, or --out <file>.
 
               apply <pack>...      Install one or more .pgmod files into the game.
               verify               Check every bundle against the hash the game recorded for it.
@@ -154,7 +157,7 @@ static int Run(CommandLine line)
     // Before the game is looked for: a typo is a typo whether or not there is a game to find.
     string[] commands =
         ["info", "consolidate", "verify", "mods", "apply", "enable", "disable", "remove", "items", "weapons", "show", "extract",
-         "animation"];
+         "animation", "maps", "map"];
     if (!commands.Contains(line.Command))
         throw new CommandLineException($"Unknown command '{line.Command}'.");
 
@@ -184,6 +187,8 @@ static int Run(CommandLine line)
         "weapons" => Weapons(line, catalogs),
         "show" or "extract" => ShowOrExtract(line, game, bundles, catalogs),
         "animation" => Animations(line, bundles, catalogs),
+        "maps" => Maps(line, bundles),
+        "map" => ExportMap(line, bundles),
         _ => throw new CommandLineException($"Unknown command '{line.Command}'."),
     };
 }
@@ -363,6 +368,38 @@ static int Animations(CommandLine line, BundleSet bundles, Lazy<GameCatalogs> ca
         Console.WriteLine();
         Console.WriteLine($"  {chosen.Source} holds it. Pack the workspace to make it a mod.");
     }
+}
+
+static int Maps(CommandLine line, BundleSet bundles)
+{
+    var filter = line.Positional.Count > 0 ? line.Positional[0] : null;
+    var maps = MapExporter.List(bundles)
+        .Where(m => filter is null || m.Name.Contains(filter, StringComparison.OrdinalIgnoreCase))
+        .ToList();
+    foreach (var map in maps) Console.WriteLine($"  {map.Name}");
+    Console.WriteLine();
+    Console.WriteLine($"{maps.Count} maps. `pgassettool map <name>` writes one out as a .glb.");
+    return 0;
+}
+
+static int ExportMap(CommandLine line, BundleSet bundles)
+{
+    if (line.Positional.Count != 1) throw new CommandLineException("map takes the name of one map; `pgassettool maps` lists them.");
+    var map = MapExporter.Find(bundles, line.Positional[0])
+        ?? throw new KeyNotFoundException($"No map is called '{line.Positional[0]}', or more than one has that in its name. "
+            + "`pgassettool maps <part of the name>` lists them.");
+
+    var path = Path.GetFullPath(line.Option("out") ?? Path.Combine(Directory.GetCurrentDirectory(), "maps", map.Name + ".glb"));
+    var timer = Stopwatch.StartNew();
+    var exported = MapExporter.Export(bundles, map, path);
+
+    Console.WriteLine($"{map.Name} -> {exported.Path}");
+    Console.WriteLine($"  {exported.Objects} objects, {exported.Meshes} meshes, {exported.Materials} materials, "
+        + $"{exported.Textures} pictures, {new FileInfo(exported.Path).Length / 1024.0 / 1024:0.0} MB");
+    foreach (var why in exported.Skipped.Take(8)) Console.WriteLine($"  Left out: {why}");
+    if (exported.Skipped.Count > 8) Console.WriteLine($"  and {exported.Skipped.Count - 8} more left out");
+    Console.Error.WriteLine($"total {timer.ElapsedMilliseconds}ms");
+    return 0;
 }
 
 static int Info(GameInstallation game, BundleSet bundles)

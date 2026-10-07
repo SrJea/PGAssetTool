@@ -198,6 +198,8 @@
                   InputGesture="Ctrl+Shift+E" />
         <MenuItem Header="Open _output folder" Command="{Binding OpenWorkspaceCommand}"
                   InputGesture="Ctrl+O" />
+        <MenuItem Header="Export a _map…" Click="OnMaps"
+                  ToolTip.Tip="Writes one of the game's maps as a .glb to open in Blender." />
         <Separator />
         <MenuItem Header="_Options…" Click="OnOptions" InputGesture="Ctrl+OemComma" />
         <MenuItem Header="Open the _log folder" Command="{Binding OpenLogsCommand}"

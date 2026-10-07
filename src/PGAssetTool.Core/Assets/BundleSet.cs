@@ -128,6 +128,19 @@ public sealed class BundleSet : IDisposable
         return _context.OpenBundleEntry(file, entry.Index);
     }
 
+    /// Every serialized file in a bundle. A scene bundle holds two — the scene itself, and the
+    /// `.sharedAssets` its objects use — where every other bundle here holds one.
+    public IReadOnlyList<AssetsFileInstance> OpenAll(string bundle)
+    {
+        var file = Bundle(bundle);
+        return AssetsContext.SerializedEntries(file).Select(e => _context.OpenBundleEntry(file, e.Index)).ToList();
+    }
+
+    /// The names of a bundle's stream entries (`.resS`, `.resource`), which is where a scene's
+    /// meshes and textures keep their bytes.
+    public IReadOnlyList<string> Entries(string bundle)
+        => Bundle(bundle).file.BlockAndDirInfo.DirectoryInfos.Select(d => d.Name).ToList();
+
     public AssetTypeValueField MonoBehaviour(string bundle, string name)
         => TryMonoBehaviour(bundle, name)
            ?? throw new KeyNotFoundException($"No MonoBehaviour named '{name}' in bundle '{bundle}'.");

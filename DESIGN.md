@@ -248,6 +248,30 @@ slot is fitted the same way. The decisions in it that look arbitrary:
   it has made unique with `.001` is read as the name it was; an action comes back called
   `Reload_Armature` as often as `Reload`; and an animation that starts at frame 1 starts at 0 here.
 
+### A map goes out whole, and only out
+
+A map is a scene bundle, `<name>_scene`: the scene — every object and where it stands — and a
+`.sharedAssets` with its meshes and materials, which reach textures in other bundles by CAB name.
+`MapExporter` walks the scene and writes every mesh renderer that is switched on, in itself and
+in everything above it, as a node of one glTF. What looks arbitrary:
+
+- **Statically batched objects are placed by their batch, not by themselves.** The game joins a
+  map's still objects into a few large meshes at build time, already in world space, and each
+  object draws a range of the joined mesh's submeshes. Placed by its own transform as well, every
+  one of them landed twice as far from the origin. Arena has 31 of its 60 renderers batched.
+- **Only the nearest level of detail**, or each object stands inside its own simpler copies.
+- **A mesh and a picture are written once** however many objects use them, and a material's
+  tiling goes with it as `KHR_texture_transform`, with the offset moved for glTF's top-left origin.
+- **The sky is a node of its own**, and so is what is parked out of sight. Every map sits inside a
+  sphere a couple of kilometres across; and the battle royale maps keep some 1,300 supply chests
+  and a shuttle ten kilometres below the island until a match moves them in. Both made the map a
+  speck in the file until they could be hidden.
+- **Compressed meshes are read, and models on bones are written as they stand.** Unity packs a
+  map's meshes into bit streams — the same packing as a clip's rotations — and reading only the
+  plain ones left 1,312 objects out of each battle royale map without a word. A skinned model is
+  posed by its bones where the scene leaves them, and written without the bones.
+- **Out only.** Maps are not in `Replaceable`; a pack changes items, and a map is not one.
+
 ### A workspace records what each model is drawn with
 
 `PackOperation.Wears` names, for each `.glb`, the pictures beside it that go on it. A workspace holds

@@ -176,13 +176,9 @@ public sealed record UnityMesh
         var raw = Bytes(vertexData["m_DataSize"]);
 
         // Counted rather than assumed: of 14,021 meshes in the first 400 bundles, 358 are packed
-        // this way and every one of them is in a scene bundle — the maps, which this tool does not
-        // offer. Nothing an item is made of is compressed, which is why unpacking it has never been
-        // needed. (This used to say nothing in the game was, which was wrong.)
-        if (field["m_MeshCompression"].AsInt != 0)
-            throw new NotSupportedException(
-                $"'{name}' uses Unity's mesh compression, which packs vertices into a bit stream. "
-                + "Only the game's maps are stored that way, and this tool does not offer those.");
+        // this way and every one of them is in a scene bundle — the maps. Nothing an item is made of
+        // is compressed; a map written out reads them. See Compressed.
+        if (field["m_MeshCompression"].AsInt != 0) return Compressed(field, name);
 
         // Some meshes keep their vertices in the bundle's .resS rather than in the object, exactly
         // as most textures keep their pixels — the object then carries an empty buffer and a place
@@ -210,6 +206,98 @@ public sealed record UnityMesh
             Indices = ReadIndices(field),
             SubMeshes = ReadSubMeshes(field),
             // A Matrix4x4 is sixteen flat fields named e00 through e33, not four nested rows.
+            BindPoses = field["m_BindPose"]["Array"].Children
+                .Select(m => m.Children.Select(v => v.AsFloat).ToArray()).ToList(),
+            BoneNameHashes = field["m_BoneNameHashes"]["Array"].Children.Select(c => c.AsUInt).ToList(),
+        };
+    }
+
+    /// A mesh Unity packed into bit streams: positions, texture coordinates, normals and colours
+    /// each a PackedFloatVector, triangles a PackedIntVector — the same packing the game's clips
+    /// keep their rotations in (see PackedCurve).
+    ///
+    /// Two things are not as they look. The texture coordinates are every channel one after
+    /// another, and `m_UVInfo` says which channels there are, four bits apiece: whether it exists
+    /// and how many numbers it has. And a normal is kept as two of its numbers, with whether the
+    /// third is negative in `m_NormalSigns`; it is a unit vector, so its size gives the third back.
+    private static UnityMesh Compressed(AssetTypeValueField field, string name)
+    {
+        var packed = field["m_CompressedMesh"];
+        var positions = Preview.PackedCurve.Floats(packed["m_Vertices"]);
+        var vertexCount = positions.Length / 3;
+        var attributes = new Dictionary<VertexAttribute, float[]> { [VertexAttribute.Position] = positions[..(vertexCount * 3)] };
+        var dimensions = new Dictionary<VertexAttribute, int> { [VertexAttribute.Position] = 3 };
+
+        var uv = packed["m_UV"];
+        if (!uv.IsDummy && uv["m_NumItems"].AsUInt > 0 && vertexCount > 0)
+        {
+            var all = Preview.PackedCurve.Floats(uv);
+            var info = packed["m_UVInfo"].IsDummy ? 0u : packed["m_UVInfo"].AsUInt;
+            var offset = 0;
+            for (var channel = 0; channel < 8; channel++)
+            {
+                int dimension;
+                if (info != 0)
+                {
+                    var bits = (info >> (channel * 4)) & 0xF;
+                    if ((bits & 4) == 0) continue;
+                    dimension = 1 + (int)(bits & 3);
+                }
+                else if (channel < 2) dimension = 2; // Before m_UVInfo: two channels of two, if they fit.
+                else break;
+
+                var length = dimension * vertexCount;
+                if (offset + length > all.Length) break;
+                attributes[VertexAttribute.TexCoord0 + channel] = all[offset..(offset + length)];
+                dimensions[VertexAttribute.TexCoord0 + channel] = dimension;
+                offset += length;
+            }
+        }
+
+        var normals = packed["m_Normals"];
+        if (!normals.IsDummy && normals["m_NumItems"].AsUInt / 2 == vertexCount && vertexCount > 0)
+        {
+            var xy = Preview.PackedCurve.Floats(normals);
+            var signs = Preview.PackedCurve.Ints(packed["m_NormalSigns"], (int)packed["m_NormalSigns"]["m_NumItems"].AsUInt);
+            var turned = new float[vertexCount * 3];
+            for (var v = 0; v < vertexCount; v++)
+            {
+                var (x, y) = (xy[v * 2], xy[v * 2 + 1]);
+                var square = 1 - x * x - y * y;
+                var z = 0f;
+                if (square >= 0) z = MathF.Sqrt(square);
+                else
+                {
+                    var length = MathF.Sqrt(x * x + y * y);
+                    if (length > 1e-6f) (x, y) = (x / length, y / length);
+                }
+                if (v < signs.Length && signs[v] == 0) z = -z;
+                (turned[v * 3], turned[v * 3 + 1], turned[v * 3 + 2]) = (x, y, z);
+            }
+            attributes[VertexAttribute.Normal] = turned;
+            dimensions[VertexAttribute.Normal] = 3;
+        }
+
+        var colours = packed["m_FloatColors"];
+        if (!colours.IsDummy && colours["m_NumItems"].AsUInt == vertexCount * 4 && vertexCount > 0)
+        {
+            attributes[VertexAttribute.Color] = Preview.PackedCurve.Floats(colours);
+            dimensions[VertexAttribute.Color] = 4;
+        }
+
+        var triangles = packed["m_Triangles"];
+        var indices = triangles.IsDummy
+            ? []
+            : Preview.PackedCurve.Ints(triangles, (int)triangles["m_NumItems"].AsUInt);
+
+        return new UnityMesh
+        {
+            Name = name,
+            VertexCount = vertexCount,
+            Attributes = attributes,
+            Dimensions = dimensions,
+            Indices = indices,
+            SubMeshes = ReadSubMeshes(field),
             BindPoses = field["m_BindPose"]["Array"].Children
                 .Select(m => m.Children.Select(v => v.AsFloat).ToArray()).ToList(),
             BoneNameHashes = field["m_BoneNameHashes"]["Array"].Children.Select(c => c.AsUInt).ToList(),
