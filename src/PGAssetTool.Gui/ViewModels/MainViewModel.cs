@@ -1079,9 +1079,47 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     /// a pair called `FPS_PLAYER_Arm_left` and `FPS_PLAYER_Arm_Right` on 22 items more. Matched
     /// exactly and by prefix respectively, and not loosely: an avatar's own model can be called
     /// `avatar_ programmer_arms_mesh`, and that one *is* the item.
+    /// Whether a mesh of the prefab is the player's arms rather than the item.
+    ///
+    /// Three names, because the game uses three: `Arms_Mesh` (and `ARMS_Mesh`), which nearly every
+    /// weapon prefab carries; `FPS_PLAYER_Arm_left` and `_Right`, a pair modelled separately; and
+    /// `player001`/`player002`, which is #44 Mauser's name for the same pair. Matched by prefix
+    /// where the game numbers them, and never loosely enough to catch an item called after its own
+    /// arms — an avatar's model can be `avatar_ programmer_arms_mesh`, and that one *is* the item.
     private static bool AreArms(string name)
         => string.Equals(name, Core.Weapons.WeaponResolver.Arms, StringComparison.OrdinalIgnoreCase)
-            || name.StartsWith("FPS_PLAYER_Arm", StringComparison.OrdinalIgnoreCase);
+            || name.StartsWith("FPS_PLAYER_Arm", StringComparison.OrdinalIgnoreCase)
+            || (name.StartsWith("player", StringComparison.OrdinalIgnoreCase)
+                && name.Length > 6 && char.IsDigit(name[^1]));
+
+    /// Whether a part of the prefab is one of the model or something standing in for it.
+    ///
+    /// **A single quad is a marker, not a part.** The prefabs are full of them — `Bone_Root`,
+    /// `Bone_Clips`, `Bone_Shutter`, `Bone_Bullet`, 26 of them across 618 items — put where a
+    /// magazine leaves or a shell ejects so that something in the game can be told where that is.
+    /// Drawn, they are a white flake hanging in the model, and five of the 26 are read as carrying
+    /// an outline shell, which refused the join outright and left #7 and #31 showing the gun alone.
+    ///
+    /// A part that really does carry a shell is left out rather than refusing the rest: whether to
+    /// cull by facing is decided for a whole mesh, so a shelled part cannot be joined to an unshelled
+    /// one — but the other parts can still be joined to each other. 12 of 618 items have one.
+    private static bool IsPart(UnityMesh mesh)
+        => mesh.Indices.Length / 3 > 2 && !mesh.CarriesAnOutline;
+
+    /// The object this item's own prefab hangs from, which every part has to be read under.
+    ///
+    /// **Several prefabs draw the same meshes and they disagree.** A weapon's own prefab holds one
+    /// arrangement and `<prefab>_info`, the one the shop shows, holds another — and `Skeleton.For`
+    /// answering by mesh alone takes whichever renderer comes first in the file, which is an
+    /// accident of file order. Read that way, #1's gun came back under `Weapon1_info` and its arms
+    /// under `Weapon1`: two hierarchies, so the two were placed a metre apart with nothing saying so.
+    /// This mesh's skeleton, read under the item's own prefab where there is one to name.
+    private Skeleton? Under(string bundle, long pathId)
+        => (PrefabRoot is { } root ? Skeleton.For(_bundles!, bundle, pathId, root, whole: true) : null)
+            ?? Skeleton.For(_bundles!, bundle, pathId, whole: true);
+
+    private string? PrefabRoot
+        => _tree?.PrefabPath is { Length: > 0 } path ? path[(path.LastIndexOf('/') + 1)..] : null;
 
     /// The rest of the prefab, to be drawn with the mesh on this row.
     ///
@@ -1125,7 +1163,9 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
                 var field = _bundles!.Context.Deserialize(file, info);
                 if (field is null || UnityMesh.Read(field) is not { VertexCount: > 0 } mesh) continue;
-                if (Skeleton.For(_bundles, bundle, other.PathId, whole: true) is not { } bones) continue;
+                if (!IsPart(mesh)) continue;
+                // Under this item's own prefab, so every part is placed by one hierarchy.
+                if (Under(bundle, other.PathId) is not { } bones) continue;
 
                 with.Add((mesh, bones, !arms));
                 wearing.AddRange(TexturesFor(_tree.MeshTextures
@@ -1571,7 +1611,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                 var (skeleton, motions) = loaded is UnityMesh
                     ? await Task.Run(() =>
                     {
-                        var bones = Skeleton.For(_bundles!, node.Bundle, node.PathId, whole: true);
+                        var bones = Under(node.Bundle, node.PathId);
                         return (bones, ClipsFor(node, bones));
                     })
                     : (null, []);
