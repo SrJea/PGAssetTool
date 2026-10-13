@@ -102,6 +102,10 @@ public sealed partial class PreviewViewModel(AlphaPreference? alpha = null) : Ob
     /// would shrink every weapon to make room for a forearm reaching out of the picture.
     [ObservableProperty] private UnityMesh? _framing;
 
+    /// What the view is framed by with nothing playing, kept so that putting a clip down puts the
+    /// frame back where it was.
+    private UnityMesh? _resting;
+
     /// How many of the submeshes on screen belong to the model on the row rather than to the parts
     /// shown beside it. The model's come first in the join, so these are the first this many.
     ///
@@ -166,11 +170,71 @@ public sealed partial class PreviewViewModel(AlphaPreference? alpha = null) : Ob
     {
         Time = 0;
         OnPropertyChanged(nameof(Length));
+        Framing = Room(value?.Motion) ?? _resting;
         Pose();
 
         // Choosing one is asking to see it. Stopping is the button beside it.
         if (value is not null) Playing = true;
         else Playing = false;
+    }
+
+    /// Room enough for the whole of a clip, so that what it does stays on screen.
+    ///
+    /// A model is framed by where it sits at rest, and most clips barely leave it — measured over
+    /// 1,150 of them, the middle one carries the model a twelfth of its own radius and nine in ten
+    /// stay inside one. The rest really do travel: #8's knife swings two and a half radii out as it
+    /// strikes, #122's bow three and a half, #147's dual shotguns nearly nine as they reload. Framed
+    /// by the rest pose, those leave the picture and come back.
+    ///
+    /// So the clip is sampled and the frame made big enough for all of it. Eight steps and the ends:
+    /// what is being measured is where the model gets to, and a corner of that is not missed by a
+    /// twelfth of a second. The answer is a box because a frame is only ever asked for its bounds.
+    private UnityMesh? Room(Motion? motion)
+    {
+        if (motion is null || _skeleton is null || _authored is null || _resting is null) return null;
+
+        float lx = float.MaxValue, ly = float.MaxValue, lz = float.MaxValue;
+        float hx = float.MinValue, hy = float.MinValue, hz = float.MinValue;
+
+        for (var step = 0; step <= 8; step++)
+        {
+            var at = motion.Length * step / 8f;
+            UnityMesh posed;
+            try { posed = Built(motion, at, framing: true) ?? _skeleton.Pose(_authored, motion, at); }
+            catch (Exception e) when (e is IndexOutOfRangeException or ArgumentOutOfRangeException
+                                          or KeyNotFoundException or InvalidOperationException)
+            {
+                return null;
+            }
+
+            var box = MeshBounds.Of(posed);
+            lx = MathF.Min(lx, box.Centre.X - box.Size.X / 2);
+            ly = MathF.Min(ly, box.Centre.Y - box.Size.Y / 2);
+            lz = MathF.Min(lz, box.Centre.Z - box.Size.Z / 2);
+            hx = MathF.Max(hx, box.Centre.X + box.Size.X / 2);
+            hy = MathF.Max(hy, box.Centre.Y + box.Size.Y / 2);
+            hz = MathF.Max(hz, box.Centre.Z + box.Size.Z / 2);
+        }
+
+        if (hx < lx) return null;
+
+        float[] corners =
+        [
+            lx, ly, lz,  hx, ly, lz,  lx, hy, lz,  hx, hy, lz,
+            lx, ly, hz,  hx, ly, hz,  lx, hy, hz,  hx, hy, hz,
+        ];
+
+        return new UnityMesh
+        {
+            Name = "room",
+            VertexCount = 8,
+            Attributes = new Dictionary<VertexAttribute, float[]> { [VertexAttribute.Position] = corners },
+            Dimensions = new Dictionary<VertexAttribute, int> { [VertexAttribute.Position] = 3 },
+            Indices = [],
+            SubMeshes = [],
+            BindPoses = [],
+            BoneNameHashes = [],
+        };
     }
 
     partial void OnTimeChanged(double value) => Pose();
@@ -408,9 +472,10 @@ public sealed partial class PreviewViewModel(AlphaPreference? alpha = null) : Ob
         Own = Math.Max(mesh.SubMeshes.Count, 1);
         Shelled = _with.Count == 0 ? null
             : mesh.CarriesAnOutline || _with.Any(w => w.Mesh.CarriesAnOutline);
-        Framing = skeleton?.Assembled(mesh) ?? mesh;
+        Framing = _resting = skeleton?.Assembled(mesh) ?? mesh;
         if (Built(null, 0f) is { } together && skeleton is not null)
-            (Rest, Framing) = (together,
+            (Rest, Framing, _resting) = (together,
+                Built(null, 0f, framing: true) ?? skeleton.Placed(mesh, null, 0f),
                 Built(null, 0f, framing: true) ?? skeleton.Placed(mesh, null, 0f));
         else
             Rest = Framing;

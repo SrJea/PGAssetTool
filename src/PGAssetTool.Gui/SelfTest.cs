@@ -988,6 +988,7 @@ internal static class SelfTest
             if (AnOutlineIsLeftOutWhicheverShapeItTakes(model) is { } shellProblem) return Fail(shellProblem);
             if (AWeaponIsShownInTheArmsThatHoldIt(model) is { } armsProblem) return Fail(armsProblem);
             if (AnItemIsPreviewedWhole(model) is { } wholeProblem) return Fail(wholeProblem);
+            if (AClipIsGivenRoomToMoveIn(model) is { } roomProblem) return Fail(roomProblem);
             if (AnotherKindGoesTheWholeWay(model, model.WorkspaceRoot) is { } otherKind) return Fail(otherKind);
 
             var texture = model.Editor.Files.FirstOrDefault(f => f.Name.EndsWith(".png"));
@@ -4458,6 +4459,58 @@ internal static class SelfTest
         }
 
         return null;
+    }
+
+    /// A clip that carries the model out of where it rests is given room to do it in.
+    ///
+    /// Most do not: measured over 1,150 clips the middle one moves the model a twelfth of its own
+    /// radius. The ones that do, do it wholeheartedly — #8's knife swings two and a half radii out
+    /// as it strikes — and framed by the rest pose they leave the picture and come back.
+    ///
+    /// So the frame is asked for, not the picture: what this checks is that choosing such a clip
+    /// widens it and putting the clip down gives it back.
+    private static string? AClipIsGivenRoomToMoveIn(MainViewModel model)
+    {
+        var was = model.Kind;
+
+        try
+        {
+            if (!Select(model, Core.Catalog.ItemKinds.Weapon, "Knife")) return "#8 could not be selected";
+            if (model.Detail is not { SelectedNode: { Class: AssetClassID.Mesh } opened })
+                return "selecting #8 left no model on the row";
+            if (!Arrived(model, opened)) return "#8 never reached the preview";
+
+            var preview = model.Preview;
+            if (preview.Framing is not { } resting) return "nothing says what the view is framed by";
+            if (preview.Clips.FirstOrDefault(c => c.Name.Equals("Shoot", StringComparison.OrdinalIgnoreCase))
+                is not { } swing) return $"#8 has no Shoot among {preview.Clips.Count} clip(s)";
+
+            var still = Core.Export.Meshes.MeshBounds.Of(resting).Radius;
+            preview.Clip = swing;
+            preview.Stop();
+
+            var playing = preview.Framing is { } room ? Core.Export.Meshes.MeshBounds.Of(room).Radius : 0f;
+            Console.WriteLine($"room     #8 Shoot: framed by {still:0.###} at rest, {playing:0.###} playing");
+
+            if (playing <= still * 1.05f)
+                return $"#8's Shoot swings well out of where the knife rests and the frame stayed at "
+                    + $"{still:0.###}, so most of it happens off the picture";
+
+            preview.Clip = null;
+            var back = preview.Framing is { } again ? Core.Export.Meshes.MeshBounds.Of(again).Radius : 0f;
+            return Math.Abs(back - still) < 0.001f
+                ? null
+                : $"putting the clip down left the frame at {back:0.###} rather than back at {still:0.###}";
+        }
+        finally
+        {
+            model.Preview.Clip = null;
+            if (model.Kind != was)
+            {
+                model.Kind = was;
+                WaitWhile(() => model.Weapons.Count == 0, 60_000);
+            }
+        }
     }
 
     /// Whether the weapon a selection lands on can actually be decoded.
