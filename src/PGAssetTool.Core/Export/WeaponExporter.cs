@@ -17,6 +17,19 @@ public sealed record WeaponExport(
     IReadOnlyList<string> Skipped,
     IReadOnlyList<string>? Notes = null);
 
+/// An extract refused because a bundle it would read has been changed by something this copy of the
+/// tool has no original for. See WeaponExporter.Refuse.
+///
+/// A class of its own so a caller can tell this refusal from a bug. Both were an
+/// InvalidOperationException, and the CLI reported an empty LINQ sequence inside the export as
+/// though it were this message's verdict on the game. Still one of those, so anything that caught
+/// the refusal by its old type goes on catching it.
+public sealed class AlteredBundlesException(IReadOnlyList<string> bundles, string message)
+    : InvalidOperationException(message)
+{
+    public IReadOnlyList<string> Bundles { get; } = bundles;
+}
+
 /// Writes out everything belonging to one weapon, arranged so the result is browsable: images in
 /// one place, audio in another, and the object graph as a single readable document rather than a
 /// file per Transform.
@@ -47,6 +60,7 @@ public sealed class WeaponExporter(BundleSet bundles)
         [AssetClassID.Texture2D] = "textures",
         [AssetClassID.AudioClip] = "audio",
         [AssetClassID.Mesh] = "meshes",
+        [AssetClassID.AnimationClip] = "animations",
     };
 
     /// One of the weapon's skins to write out as well as the default look, by id or display name.
@@ -114,7 +128,8 @@ public sealed class WeaponExporter(BundleSet bundles)
 
                     if (wanted.TryGetValue(node.Class, out var folder))
                         Once(assets, _exporter.Export(
-                            group.Key, file, info, Path.Combine(directory, folder)));
+                            group.Key, file, info, Path.Combine(directory, folder),
+                            Distinct(assets, node, Path.Combine(directory, folder))));
                 }
             }
         }
@@ -131,6 +146,14 @@ public sealed class WeaponExporter(BundleSet bundles)
 
         foreach (var related in tree.Related)
         {
+            // The shop icon is written once, into icon/, whichever route reaches it. Everything but
+            // a weapon is found by its own id, and so is its icon — `OfferIcons/hat_chest_icon1_big`
+            // is among the related assets as well as being the icon — which wrote the one picture
+            // twice, as two files and two operations on the same asset. An author who edited one
+            // copy had the other put the original straight back over it, or not, by manifest order.
+            if (tree.Icon?.AssetPath is { } icon
+                && string.Equals(related.Path, icon, StringComparison.OrdinalIgnoreCase)) continue;
+
             if (!Wanted(tree, related, chosen)) continue;
             if (related.Bundle is null) { skipped.Add($"{related.Path}: bundle unknown"); continue; }
             var leaf = related.Path[(related.Path.LastIndexOf('/') + 1)..];
@@ -140,12 +163,15 @@ public sealed class WeaponExporter(BundleSet bundles)
 
         if (chosen is not null) ExportSkin(chosen, brought, directory, assets, skipped);
         else if (Skin is { Length: > 0 } asked)
-            skipped.Add($"'{asked}': this weapon has no such skin");
+            skipped.Add($"'{asked}': this {tree.Record.Kind.Name.ToLowerInvariant()} has no such skin");
 
         if (chosen is null) PairTheDefaultSkin(tree, directory, assets, notes, skipped);
 
         DrawPackIcon(tree, directory, skipped);
         Dress(assets, tree, chosen);
+
+        skipped.AddRange(_exporter.Failed);
+        _exporter.Failed.Clear();
 
         return new WeaponExport(directory, assets, skipped, notes);
     }
@@ -185,7 +211,7 @@ public sealed class WeaponExporter(BundleSet bundles)
     {
         if (altered.Count == 0) return;
 
-        throw new InvalidOperationException(
+        throw new AlteredBundlesException(altered,
             $"{(altered.Count == 1 ? "A bundle this item is in has" : $"{altered.Count} bundles this item is in have")} "
             + "been changed by something other than this copy of the tool, which has no original to read instead: "
             + string.Join(", ", altered.Take(4)) + (altered.Count > 4 ? ", …" : "")
@@ -465,6 +491,27 @@ public sealed class WeaponExporter(BundleSet bundles)
         }
     }
 
+    /// A file name for an animation that no other one here already has, or null for the usual one.
+    ///
+    /// A weapon's clips are called after what they are for, and a prefab with two Animation
+    /// components — the gun and a part that moves on its own — has two of each: two Shoots, two
+    /// Idles. Written by name, the second went over the first and the first was then in the manifest
+    /// under a file holding the other one's motion. Textures that share a name are left as they
+    /// always were; this is about clips, where it is the rule rather than the exception.
+    private static string? Distinct(List<ExportedAsset> written, AssetNode node, string folder)
+    {
+        if (node.Class != AssetClassID.AnimationClip) return null;
+
+        // By another clip: the same clip reached a second way is the same file, which Once settles.
+        bool Taken(string name) => written.Any(a => a.Address.PathId != node.PathId && string.Equals(
+            a.Path, Path.Combine(folder, AssetExporter.Sanitize(name) + Animation.ClipFile.Extension),
+            StringComparison.OrdinalIgnoreCase));
+
+        if (!Taken(node.Name)) return null;
+        for (var n = 2; ; n++)
+            if (!Taken($"{node.Name} ({n})")) return $"{node.Name} ({n})";
+    }
+
     /// Records what was written, without listing the same file twice.
     ///
     /// One asset is reached by several routes — a texture four materials name, a mesh that both the
@@ -595,7 +642,8 @@ public sealed class WeaponExporter(BundleSet bundles)
             if (info is null) continue;
 
             if (Folders.TryGetValue(node.Class, out var folder))
-                Once(assets, _exporter.Export(bundle, holder, info, Path.Combine(into, folder)));
+                Once(assets, _exporter.Export(bundle, holder, info, Path.Combine(into, folder),
+                    Distinct(assets, node, Path.Combine(into, folder))));
         }
     }
 
@@ -611,12 +659,18 @@ public sealed class WeaponExporter(BundleSet bundles)
         {
             // The biggest mesh that has textures: a weapon carries arms and muzzle-flash geometry
             // as well, and neither of those is what anybody means by the weapon.
-            var subject = tree.MeshTextures
+            //
+            // Gathered before choosing, because MaxBy over a sequence of tuples throws on an empty
+            // one rather than answering a default — and an item with no dressed mesh at all is
+            // ordinary outside the weapons. It took the whole extract down with it.
+            var dressed = tree.MeshTextures
                 .Select(slots => (Slots: slots, Mesh: ReadMesh(tree, slots.MeshPathId)))
                 .Where(m => m.Mesh is not null)
-                .MaxBy(m => m.Mesh!.VertexCount);
+                .Select(m => (m.Slots, Mesh: m.Mesh!))
+                .ToList();
+            if (dressed.Count == 0) return;
 
-            if (subject.Mesh is null) return;
+            var subject = dressed.MaxBy(m => m.Mesh.VertexCount);
 
             var textures = subject.Slots.BySubMesh.Select(TextureFor).ToList();
 
@@ -710,6 +764,53 @@ public sealed class WeaponExporter(BundleSet bundles)
         return export;
     }
 
+    /// One look of an item written out: the item as it comes (`Skin` null) or one of its skins.
+    /// <param name="Failed">Why it was not written, where it was not; the others go on regardless.</param>
+    public sealed record LookExport(string? Skin, string Name, WeaponExport? Export, string? Failed);
+
+    /// The item as it comes and then every one of its skins, each into a workspace of its own —
+    /// except the default skin, which the item as it comes already covers.
+    ///
+    /// One workspace per look, because one pack is one look: the mod a skin's workspace builds
+    /// replaces that skin and nothing else, and is turned on and off apart from the others. Each
+    /// gets the folder a single extraction of it would, so asking for all of them is the same as
+    /// asking for each in turn. One that cannot be written — a bundle changed by something else, a
+    /// skin whose model is missing — is said and skipped, and the rest are still written.
+    /// <param name="opaque">As `Opaque`, for every look.</param>
+    /// <param name="maskUnused">As `MaskUnused`, for every look.</param>
+    /// <param name="progress">Told before each look: which one, of how many, and its name.</param>
+    public static IReadOnlyList<LookExport> ExportEveryLook(
+        Assets.BundleSet bundles, WeaponTree tree, string outputRoot, string author, string? gameVersion,
+        bool opaque = false, bool maskUnused = true, Action<int, int, string>? progress = null)
+    {
+        // Not the default skin: the item as it comes already writes into it — the two default looks
+        // are painted as one (see "A weapon's paint reaches its default skin" in DESIGN.md) — and a
+        // second workspace for it would build a second mod of the same pictures.
+        var looks = new List<(string? Id, string Name)> { (null, tree.DisplayName) };
+        looks.AddRange(tree.Skins
+            .Where(s => !string.Equals(s.Record.Id, tree.Record.PrefabName + "_default", StringComparison.OrdinalIgnoreCase))
+            .Select(s => ((string?)s.Record.Id, s.DisplayName ?? s.Record.Id)));
+
+        var written = new List<LookExport>();
+        for (var at = 0; at < looks.Count; at++)
+        {
+            var (id, name) = looks[at];
+            progress?.Invoke(at + 1, looks.Count, name);
+
+            var exporter = new WeaponExporter(bundles) { Opaque = opaque, MaskUnused = maskUnused, Skin = id };
+            try
+            {
+                written.Add(new LookExport(id, name, exporter.ExportAsWorkspace(tree, outputRoot, author, gameVersion), null));
+            }
+            catch (Exception e) when (e is AlteredBundlesException or IOException or InvalidOperationException
+                                          or KeyNotFoundException or NotSupportedException or UnauthorizedAccessException)
+            {
+                written.Add(new LookExport(id, name, null, e.Message));
+            }
+        }
+        return written;
+    }
+
     /// What the tool will know this mod by, for as long as it exists.
     ///
     /// A name and a number would not do it. The id was the weapon's slug alone, so every mod of a
@@ -764,7 +865,15 @@ public sealed class WeaponExporter(BundleSet bundles)
                 skipped.Add($"{name}: not found in '{bundle}'");
             return;
         }
-        foreach (var info in matches) Once(into, _exporter.Export(bundle, file, info, directory));
+
+        // An object already written out by another route is not written again. A related path can
+        // name a shop prefab that shares its name with the item's own texture — a glider's
+        // `Gliders_Shop/glider_aero_suit` beside its `glider_aero_suit` paint — and the search by name
+        // then wrote that texture a second time, as a second file and a second operation on the
+        // same asset, which a pack applied in whichever order its manifest happened to list them.
+        foreach (var info in matches.Where(i => !into.Any(a => a.Address.PathId == i.PathId
+                     && string.Equals(a.Address.Container, bundle, StringComparison.OrdinalIgnoreCase))))
+            Once(into, _exporter.Export(bundle, file, info, directory));
     }
 
     /// The top-level name, as it always was here: a Shader answers with its empty `m_Name`, not the

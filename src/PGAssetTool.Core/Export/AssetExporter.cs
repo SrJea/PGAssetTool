@@ -67,16 +67,33 @@ public sealed class AssetExporter(BundleSet bundles)
         Directory.CreateDirectory(directory);
         var stem = Path.Combine(directory, Sanitize(fileNameOverride ?? name));
 
-        var exported = cls switch
+        ExportedAsset? exported;
+        try
         {
-            AssetClassID.Texture2D => ExportTexture(bundle, info.PathId, field, stem),
-            AssetClassID.AudioClip => ExportAudio(bundle, field, stem),
-            AssetClassID.Mesh => ExportMesh(bundle, info.PathId, field, stem),
-            _ => null,
-        };
+            exported = cls switch
+            {
+                AssetClassID.Texture2D => ExportTexture(bundle, info.PathId, field, stem),
+                AssetClassID.AudioClip => ExportAudio(bundle, field, stem),
+                AssetClassID.Mesh => ExportMesh(bundle, info.PathId, field, stem),
+                AssetClassID.AnimationClip => ExportAnimation(field, stem),
+                _ => null,
+            };
+        }
+        catch (Exception e) when (e is not (IOException or UnauthorizedAccessException or OutOfMemoryException))
+        {
+            // One asset the game ships in a shape nothing here expected is that asset's loss, and is
+            // said so. It used to be the whole extract's: a single avatar mesh with two NaN normals
+            // left the item with no workspace at all. Trouble with the disk is still everybody's,
+            // because every file after it would fail the same way.
+            Failed.Add($"{name}: could not be written out ({e.GetType().Name}: {e.Message})");
+            return [];
+        }
 
         return exported is null ? [] : [exported with { Class = cls, Name = name, Address = address }];
     }
+
+    /// The assets Export could not write, with why, since the caller last emptied this.
+    public List<string> Failed { get; } = [];
 
     private ExportedAsset? ExportTexture(string bundle, long pathId, AssetTypeValueField field, string stem)
     {
@@ -228,6 +245,16 @@ public sealed class AssetExporter(BundleSet bundles)
         {
             return null;
         }
+    }
+
+    /// A clip's motion as a `.anim`. A clip that moves no transform — the ones that only switch a
+    /// muzzle flash on — writes nothing: there is nothing in it this tool writes back.
+    private static ExportedAsset? ExportAnimation(AssetTypeValueField field, string stem)
+    {
+        if (Preview.Motion.Read(field) is not { } motion) return null;
+        var path = stem + Animation.ClipFile.Extension;
+        Animation.ClipFile.FromMotion(motion, from: "").Write(path);
+        return new ExportedAsset(path, AssetClassID.AnimationClip, "", "anim", new FileInfo(path).Length, Placeholder);
     }
 
     private ExportedAsset? ExportAudio(string bundle, AssetTypeValueField field, string stem)

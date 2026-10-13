@@ -429,7 +429,8 @@ public sealed class ModApplier(GameInstallation game, ModStore store)
             Discard(live + Unfinished);
 
             var holds = BundleIntegrity.Md5(live);
-            if (string.Equals(holds, hash, StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(holds, hash, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(holds, store.BackupMd5(cache, bundle, hash), StringComparison.OrdinalIgnoreCase))
             {
                 written.Remove(bundle);
                 continue;
@@ -689,7 +690,13 @@ public sealed class ModApplier(GameInstallation game, ModStore store)
             var bundle = outcome.Job.Bundle;
             foreach (var id in outcome.Wrote) touchedByMod[id][bundle] = outcome.Job.Hash;
 
-            if (outcome.Wrote.Count > 0) written[bundle] = new WrittenBundle(recipes[bundle], outcome.Holds);
+            // Recorded as built only when everything meant for it went in. The recipe is what was
+            // asked for, not what came out, so a bundle where one operation failed was written down
+            // as holding that operation too — and once whatever stopped it was put right, every
+            // later reconcile left the bundle alone as already correct. A glider's mesh that the
+            // importer could not read stayed out of the game after the importer learned to.
+            if (outcome.Wrote.Count > 0 && outcome.Failed.Count == 0)
+                written[bundle] = new WrittenBundle(recipes[bundle], outcome.Holds);
             else written.Remove(bundle);
         }
     }
@@ -866,8 +873,11 @@ public sealed class ModApplier(GameInstallation game, ModStore store)
                     {
                         PackOperations.ReplaceTexture =>
                             TextureImporter.Replace(field, source, OriginalPixels(editor, field), operation.AlphaIsMask),
-                        PackOperations.ReplaceMesh => MeshImporter.Replace(field, GltfMeshReader.Read(source)),
+                        PackOperations.ReplaceMesh =>
+                            MeshImporter.Replace(field, GltfMeshReader.Read(source), editor.ReadStream),
                         PackOperations.ReplaceAudio => AudioImporter.Replace(field, source, (into, bank) => editor.AppendToStream(into, bank)),
+                        PackOperations.ReplaceAnimation =>
+                            Animation.ClipImporter.Replace(field, Animation.ClipFile.Read(source).ToMotion()),
                         _ => throw new NotSupportedException($"unknown operation '{operation.Op}'"),
                     };
                     editor.Stage(info, field);

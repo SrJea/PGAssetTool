@@ -70,6 +70,18 @@ public partial class MainWindow : Window
 
             model.SearchRequested += FocusSearch;
 
+            // A file picker belongs to the window; the editor only asks for a file.
+            model.Editor.PickGlb = async () =>
+            {
+                var chosen = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+                {
+                    Title = "An animation to use",
+                    AllowMultiple = false,
+                    FileTypeFilter = [new FilePickerFileType("glTF Binary") { Patterns = ["*.glb"] }],
+                });
+                return chosen.Count > 0 ? chosen[0].TryGetLocalPath() : null;
+            };
+
             // The scale is read out of the settings after the window is up, so this is also how it
             // is applied at startup rather than only when somebody changes it.
             model.PropertyChanged += (_, changed) =>

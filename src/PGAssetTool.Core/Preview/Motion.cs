@@ -35,6 +35,9 @@ public sealed record Motion(string Name, float Length, float SampleRate, IReadOn
         Gather(clip["m_RotationCurves"], MotionChannel.Rotation, 4, curves);
         Gather(clip["m_ScaleCurves"], MotionChannel.Scale, 3, curves);
 
+        // And the rotations a compressed clip keeps packed instead. See PackedCurve.
+        curves.AddRange(PackedCurve.Rotations(clip));
+
         if (curves.Count == 0) return null;
 
         var length = curves.SelectMany(c => c.Keys).Select(k => k.Time).DefaultIfEmpty(0f).Max();
@@ -52,44 +55,6 @@ public sealed record Motion(string Name, float Length, float SampleRate, IReadOn
     /// its own — `Weapon893_deepwater_comet/FPS_PLAYER_Arm_Right/Bone_comet_sniper_rifle_root/...` —
     /// and it is the weapon's clips that play on it. That first name is the one thing the two do not
     /// share, and a path is matched by how it ends, so taking it off is all it needs.
-    /// The same motion over a different span of time.
-    ///
-    /// A clip of this kind has no duration of its own: its length is the time of its last keyframe,
-    /// and nothing else in the object says when it ends. So retiming it is a change of units on one
-    /// axis — every key's time multiplied, and every slope divided, because a slope is a value per
-    /// second and the seconds have changed. The curve between two keys is the same Hermite curve
-    /// reparameterised, so the shape is kept exactly and only the clock differs.
-    ///
-    /// This is what lets a motion be moved onto another weapon without changing how fast that
-    /// weapon behaves: the game appears to take its rate of fire from the length of the Shoot clip,
-    /// and a motion put on at its own length would change it. See ClipTiming.
-    public Motion Stretched(float factor)
-    {
-        if (factor <= 0 || !float.IsFinite(factor)) return this;
-
-        return this with
-        {
-            Length = Length * factor,
-            Curves = Curves
-                .Select(curve => curve with
-                {
-                    Keys = curve.Keys.Select(key => key with
-                    {
-                        Time = key.Time * factor,
-                        InX = key.InX / factor, InY = key.InY / factor,
-                        InZ = key.InZ / factor, InW = key.InW / factor,
-                        OutX = key.OutX / factor, OutY = key.OutY / factor,
-                        OutZ = key.OutZ / factor, OutW = key.OutW / factor,
-                    }).ToList(),
-                })
-                .ToList(),
-        };
-    }
-
-    /// The same motion made to last exactly this long, whatever it lasts now.
-    public Motion Lasting(float seconds)
-        => Length <= 0 || seconds <= 0 ? this : Stretched(seconds / Length);
-
     public Motion WithoutRoot() => this with
     {
         Curves = Curves
@@ -154,7 +119,7 @@ public sealed record Motion(string Name, float Length, float SampleRate, IReadOn
     }
 
     /// One curve at one moment, between the keys either side of it.
-    private static (float X, float Y, float Z, float W) Sample(MotionCurve curve, float time)
+    public static (float X, float Y, float Z, float W) Sample(MotionCurve curve, float time)
     {
         var keys = curve.Keys;
         if (keys.Count == 1 || time <= keys[0].Time)

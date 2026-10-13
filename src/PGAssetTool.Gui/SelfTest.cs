@@ -23,7 +23,11 @@ internal static class SelfTest
     private static extern bool AttachConsole(int processId);
 
 
-    public static int Run()
+    /// <param name="game">
+    /// The installation to test against, or null for the one the tool would find on its own. A copy
+    /// of the game is the safer thing to point this at: it installs and removes for real.
+    /// </param>
+    public static int Run(string? game = null)
     {
         // A WinExe starts with no console, so a published build writing to one would print into
         // nowhere. Borrowing the terminal that launched it is what makes --self-test usable on the
@@ -44,7 +48,7 @@ internal static class SelfTest
         // works right up until one of them touches a collection a control is bound to — and then
         // fails with "call from invalid thread" somewhere far from the cause. The whole point of
         // this test is to be the app, so it waits the way the app does.
-        return Body();
+        return Body(game);
     }
 
 
@@ -87,12 +91,17 @@ internal static class SelfTest
         return false;
     }
 
-    private static int Body()
+    private static int Body(string? game)
     {
         // Its own directory, thrown away afterwards. This test extracts, edits, packs and installs
         // for real; doing that in the author's workspace put its scratch work in the same list as
         // theirs and, when the selection drifted, packed one of theirs instead.
         var scratch = Directory.CreateTempSubdirectory("pgassettool-selftest").FullName;
+
+        // The game asked for goes into this run's own preferences, which is where the window reads
+        // the game folder from — so it is opened exactly as the Options setting would open it.
+        if (game is not null)
+            new PGAssetTool.Core.Settings.ToolSettings { GameDirectory = Path.GetFullPath(game) }.Save(scratch);
         var model = new MainViewModel { WorkspaceOverride = scratch, SettingsHome = scratch };
 
         // Held out here so the tidying up on the way out knows what the author's game looked like
@@ -118,6 +127,7 @@ internal static class SelfTest
         {
             Settle(model.LoadAsync(), "opening the game");
             Console.WriteLine($"status   {model.Status}");
+            Console.WriteLine($"game     {model.Game?.RootDirectory ?? "(none)"}");
 
             Console.WriteLine($"crash    notice: {model.CrashNotice ?? "(none)"}");
             if (model.CrashNotice is not { } notice || !notice.Contains(Path.GetFileName(planted)))
@@ -149,6 +159,7 @@ internal static class SelfTest
             if (model.Weapons.Count == 0) return Fail("the catalog produced no weapons");
 
             if (EveryKindIsOffered(model) is { } kindsProblem) return Fail(kindsProblem);
+            if (EveryKindOpens(model, scratch) is { } kindProblem) return Fail(kindProblem);
 
             if (WhichMeshIsTheWeapon(model) is { } wrongMesh) return Fail(wrongMesh);
 
@@ -571,9 +582,16 @@ internal static class SelfTest
                 return Fail($"naming the game opened '{model.Game?.RootDirectory}' instead");
             if (model.Weapons.Count == 0) return Fail("naming the game left no weapons");
 
-            model.GameDirectory = "";
+            // Back to finding it — unless this run was pointed at a game of its own, in which case
+            // back to that. Finding it means Steam's copy, the one being played, and everything after
+            // this installs into whichever game is open: a run pointed at a spare copy carried on
+            // into the real one from here, and was stopped only by a bundle another tool had modded.
+            model.GameDirectory = game is null ? "" : Path.GetFullPath(game);
             WaitWhile(() => model.Busy, 120_000);
             if (model.Weapons.Count == 0) return Fail("going back to finding it left no weapons");
+            if (game is not null && !string.Equals(Path.GetFullPath(model.Game?.RootDirectory ?? ""),
+                    Path.GetFullPath(game).TrimEnd('\\', '/'), StringComparison.OrdinalIgnoreCase))
+                return Fail($"the run was pointed at '{game}' and is now on '{model.Game?.RootDirectory}'");
 
             // Searched, so the reload has something to put back wrongly. A reload happens under
             // somebody in the middle of something — building a pack causes one — and it used to
@@ -950,6 +968,8 @@ internal static class SelfTest
             Core.Pack.Workspace.Save(written, Core.Pack.Workspace.Read(written) with { Protect = null });
 
             if (TheEditorPutsTheModelInItsPaint(model) is { } paintProblem) return Fail(paintProblem);
+            if (AnimationsCanBeTakenFromAnotherWeapon(model) is { } animationProblem) return Fail(animationProblem);
+            if (AnimationsGoOutAsAGlbAndComeBack(model) is { } glbProblem) return Fail(glbProblem);
             if (OneMeshCanWearTwoPictures(model, model.WorkspaceRoot) is { } twoPaints) return Fail(twoPaints);
             if (AnItemIsTheObjectTheGameLoads(model) is { } loadedProblem) return Fail(loadedProblem);
             if (AnOutlineIsLeftOutWhicheverShapeItTakes(model) is { } shellProblem) return Fail(shellProblem);
@@ -2344,6 +2364,113 @@ internal static class SelfTest
 
         if (!model.OffersKinds) return "there is more than one kind and the picker is hidden";
 
+        return null;
+    }
+
+    /// Every kind the game has opens in the browser, and one that is not a weapon goes all the way
+    /// to a workspace.
+    ///
+    /// Weapons were the only kind for the tool's first year, and everything that reads one turned
+    /// out to be general already: a hat is a prefab under a root of its own with a skin beside it
+    /// and an offer icon named after its id, which is a weapon's arrangement with the names changed.
+    /// What was missing was a catalogue per kind, and those are all in `generated_data`.
+    ///
+    /// So this drives the picker rather than the catalogue: select each kind, take the first thing
+    /// in it, and see a tree with a model in it come back. A kind whose registry reads but whose
+    /// prefabs do not resolve looks perfectly healthy from the catalogue's side and shows an empty
+    /// pane, which is the failure worth catching. A model and not merely something: 50 of the 112
+    /// pets resolved to a GameObject and its Transform — a description of the pet that shares its
+    /// name — and an assets-at-all check let every one of them through.
+    private static string? EveryKindOpens(MainViewModel model, string scratch)
+    {
+        if (model.Kinds.Count < 2) return "only one kind of thing was found in the game";
+        if (!model.OffersKinds) return "the kind picker is hidden with kinds to choose between";
+
+        var was = model.Kind;
+
+        try
+        {
+            foreach (var kind in model.Kinds)
+            {
+                model.Kind = kind;
+                if (model.Weapons.Count == 0) return $"the {kind.Name} list came up empty";
+
+                var first = model.Weapons[0];
+                model.Selected = first;
+
+                if (!WaitWhile(() => model.Detail?.Tree.Record.Slug != first.Record.Slug, 60_000))
+                    return $"'{first.Record.Slug}' ({kind.Name}) never resolved: {model.Status}";
+
+                var tree = model.Detail!.Tree;
+                Console.WriteLine($"kinds    {kind.Name,-10} {model.Weapons.Count,5} listed   "
+                    + $"first '{tree.DisplayName}' in {tree.PrefabBundle ?? "-"}: "
+                    + $"{tree.PrefabAssets.Count} assets, {tree.Related.Count} related, "
+                    + $"mesh {tree.MainMesh?.Name ?? "-"}, icon {(tree.Icon is null ? "no" : "yes")}");
+
+                if (tree.PrefabBundle is null)
+                    return $"'{first.Record.Slug}' ({kind.Name}) is in no bundle: "
+                        + string.Join("; ", tree.UnresolvedReasons);
+                if (tree.PrefabAssets.Count == 0)
+                    return $"'{first.Record.Slug}' ({kind.Name}) resolved to nothing";
+                if (tree.MainMesh is null)
+                    return $"'{first.Record.Slug}' ({kind.Name}) resolved to {tree.PrefabAssets.Count} objects and no model";
+            }
+        }
+        finally
+        {
+            model.Kind = was;
+        }
+
+        return HatsExtractLikeWeapons(model, scratch);
+    }
+
+    /// A hat written out as a workspace is a workspace like any other, and says it is a hat.
+    ///
+    /// The whole point of the kinds being the same shape is that nothing downstream has to change,
+    /// and the one thing that does is the label: a pack is filed by what it is for, so a hat that
+    /// called itself a weapon would go in the wrong folder and show up under the wrong heading in
+    /// the manager.
+    ///
+    /// Read through the originals the way the window reads, so a hat whose bundles a mod has been
+    /// installed over is still written out as the game ships it.
+    private static string? HatsExtractLikeWeapons(MainViewModel model, string scratch)
+    {
+        if (model.Game is null || Core.Catalog.ItemKinds.ByName("Hat") is not { } hats) return null;
+
+        using var bundles = new BundleSet(model.Game, originals: new ModStore(model.Game).OriginalOf);
+        var catalogs = Core.Catalog.GameCatalogs.Load(bundles);
+        if (catalogs.Of(hats).FirstOrDefault() is not { } hat) return "the game lists no hats";
+
+        var tree = new Core.Weapons.WeaponResolver(bundles, catalogs).Resolve(hat);
+        var into = Path.Combine(scratch, "kinds");
+
+        var export = new Core.Export.WeaponExporter(bundles) { MaskUnused = true }
+            .ExportAsWorkspace(tree, into, "self test", null);
+
+        var manifest = Core.Pack.Workspace.Read(export.Directory);
+
+        Console.WriteLine($"kinds    '{hat.Slug}' written out as {manifest.Operations.Count} "
+            + $"replaceable file(s), filed as {manifest.Subject?.Kind}/{manifest.Subject?.Id}");
+
+        if (manifest.Subject?.Kind != hats.Pack)
+            return $"a hat's workspace is filed as '{manifest.Subject?.Kind}'";
+        if (manifest.Subject.Number != 0)
+            return $"a hat was given the number {manifest.Subject.Number}, and hats are not numbered";
+        if (manifest.Operations.Count == 0) return "a hat's workspace named nothing replaceable";
+
+        // Its own texture, not the particle sheet it shares with everything else: a kind whose
+        // prefab resolves but whose own art does not is a kind that looks fine and is not.
+        if (!manifest.Operations.Any(o => o.Source.Contains(hat.Slug, StringComparison.OrdinalIgnoreCase)))
+            return $"nothing in '{hat.Slug}'s workspace is named after it";
+
+        // Every asset once. The shop icon is reached as the icon and again among the related assets,
+        // and was written out twice as two operations on the same texture.
+        if (manifest.Operations
+                .GroupBy(o => (o.Target.Container.ToLowerInvariant(), o.Target.PathId))
+                .FirstOrDefault(g => g.Select(o => o.Source).Distinct().Count() > 1) is { } twice)
+            return $"'{hat.Slug}'s workspace writes {twice.First().Target} from {twice.Count()} files";
+
+        try { Directory.Delete(into, recursive: true); } catch (IOException) { }
         return null;
     }
 
@@ -4295,6 +4422,122 @@ internal static class SelfTest
     /// everything after it runs against the wrong model. That has now cost two afternoons in two
     /// different places — the browse tree was the first — so both wait on the caption, which names
     /// what is actually in front of you.
+    /// An animation in a workspace plays on the model it moves, and can be swapped for another
+    /// weapon's and put back.
+    ///
+    /// Through the editor's own controls: the item typed into the box, its clips listed, Use
+    /// pressed. What comes out has to be the file changed — marked edited, saying where its motion
+    /// came from — and both halves of the comparison playing a clip, the game's and the new one.
+    /// Put back, it has to be the file the extract wrote to the byte, or a pack would carry an
+    /// animation nobody changed.
+    private static string? AnimationsCanBeTakenFromAnotherWeapon(MainViewModel model)
+    {
+        var editor = model.Editor;
+        var reload = editor.Files.FirstOrDefault(f =>
+            f.Target.Class == nameof(AssetClassID.AnimationClip) && f.Target.Name == "Reload");
+        if (reload is null)
+            return $"the workspace lists no Reload animation among {editor.Files.Count(f => f.Name.EndsWith(".anim"))} .anim files";
+
+        var before = File.ReadAllBytes(reload.FullPath);
+        editor.SelectedFile = reload;
+        if (!Shows(model, reload)) return "the Reload animation never showed";
+        Console.WriteLine($"anim     {editor.AnimationSays}");
+        Console.WriteLine($"anim     game side: {editor.Original.Caption}, {editor.Original.Clips.Count} clip(s)");
+        if (!editor.IsAnimation) return "an animation was selected and the editor did not offer to change it";
+        if (!editor.Original.HasClips || !editor.Edited.HasClips)
+            return $"the Reload animation is not played on the model: {editor.Original.Nothing ?? editor.Edited.Nothing ?? "no clips"}";
+
+        // #15 Pig Hammer: its clips are among the ones the game keeps compressed.
+        editor.FromQuery = "15";
+        if (!WaitWhile(() => !editor.FromClips.Contains("Reload"), 60_000))
+            return $"typing 15 listed no Reload to take: {editor.FromFound}";
+        editor.FromClip = "Reload";
+        Settle(editor.UseAnimationCommand.ExecuteAsync(null), "putting in #15's Reload");
+        var swapped = editor.Files.FirstOrDefault(f => f.RelativePath == reload.RelativePath);
+        Console.WriteLine($"anim     {editor.Status}");
+        if (swapped is not { Edited: true }) return $"taking #15's Reload left the file unedited: {editor.Status}";
+        if (!editor.Status.Contains("fitted", StringComparison.Ordinal))
+            return $"after taking #15's Reload the window says '{editor.Status}' rather than what was done";
+        if (!editor.AnimationSays.Contains("#15", StringComparison.Ordinal))
+            return $"the editor does not say where the animation came from: '{editor.AnimationSays}'";
+
+        editor.SelectedFile = swapped;
+        if (!Shows(model, swapped)) return "the swapped animation never showed";
+        var lengths = (Game: editor.Original.Clip?.Motion.Length, Edited: editor.Edited.Clip?.Motion.Length);
+        Console.WriteLine($"anim     playing {lengths.Game:0.00}s in the game against {lengths.Edited:0.00}s as edited");
+        if (editor.Edited.Clip is null) return "the swapped animation does not play on the model";
+        // The length is the one thing that must *not* have changed — the game times the weapon by
+        // it — so what says the swap happened is the motion, not the clock. This check asked for
+        // the lengths to differ, which was right while a borrowed clip arrived at its own length
+        // and wrong from the moment the importer began fitting it, two commits later: it swapped
+        // #15's Reload in correctly and then failed for having done so.
+        if (Math.Abs((lengths.Game ?? 0) - (lengths.Edited ?? 0)) > 1e-3f)
+            return $"taking another item's Reload changed the clip from {lengths.Game:0.00}s to "
+                + $"{lengths.Edited:0.00}s, and the game reads that as how fast the weapon reloads";
+
+        if (editor.Original.Clip?.Motion is not { } played) return "the game side plays nothing to compare against";
+        if (Same(played, editor.Edited.Clip!.Motion))
+            return "the edited side plays the same animation as the game";
+
+        Settle(editor.RestoreAnimationCommand.ExecuteAsync(null), "putting the Reload back");
+        if (!before.AsSpan().SequenceEqual(File.ReadAllBytes(reload.FullPath)))
+            return "putting the Reload back did not write the file the extract wrote";
+        if (editor.Files.FirstOrDefault(f => f.RelativePath == reload.RelativePath) is not { Edited: false })
+            return "the Reload put back is still marked edited";
+
+        return null;
+    }
+
+    /// A workspace's animations go out as one glTF to edit in Blender, and an animation of one comes
+    /// back into a slot.
+    ///
+    /// Blender itself is not here, so what comes back is the file as it went out: read into the
+    /// slot it was written from, it is the animation that slot already plays and has to leave the
+    /// file exactly as it was — anything else marks an animation nobody touched as edited. Read
+    /// with another of its animations chosen, it has to change the slot, and say from where.
+    private static string? AnimationsGoOutAsAGlbAndComeBack(MainViewModel model)
+    {
+        var editor = model.Editor;
+        var reload = editor.Files.FirstOrDefault(f =>
+            f.Target.Class == nameof(AssetClassID.AnimationClip) && f.Target.Name == "Reload");
+        if (reload is null) return "the workspace lists no Reload animation to write out";
+        editor.SelectedFile = reload;
+        if (!Shows(model, reload)) return "the Reload animation never showed";
+
+        string? shown = null;
+        editor.ShowFile = path => shown = path;
+        Settle(editor.ExportAnimationsCommand.ExecuteAsync(null), "writing the animations to a glb");
+        Console.WriteLine($"glb      {editor.Status}");
+        if (shown is null || !File.Exists(shown)) return $"writing the animations to edit wrote nothing: {editor.Status}";
+        var takes = Core.Animation.AnimationGlb.Takes(shown);
+        if (takes.Count != editor.Files.Count(f => f.Target.Class == nameof(AssetClassID.AnimationClip)))
+            return $"the glb holds {takes.Count} animations for {editor.Files.Count(f => f.Name.EndsWith(".anim"))} in the workspace";
+
+        var before = File.ReadAllBytes(reload.FullPath);
+        Settle(editor.UseGlbFile(shown, take: null), "reading the Reload back");
+        Console.WriteLine($"glb      {editor.Status}");
+        if (!before.AsSpan().SequenceEqual(File.ReadAllBytes(reload.FullPath)))
+            return "reading back the Reload that went out unedited changed the file";
+        if (!editor.Status.Contains("unchanged", StringComparison.Ordinal))
+            return $"reading back an unedited Reload says '{editor.Status}'";
+        if (!editor.HasGlbTakes || editor.GlbTakes.Count != takes.Count)
+            return $"the glb's {takes.Count} animations are not offered to choose from ({editor.GlbTakes.Count})";
+
+        Settle(editor.UseGlbFile(shown, take: "Walk"), "putting the glb's Walk in the Reload");
+        Console.WriteLine($"glb      {editor.Status}");
+        if (editor.Files.FirstOrDefault(f => f.RelativePath == reload.RelativePath) is not { Edited: true })
+            return $"the glb's Walk left the Reload unedited: {editor.Status}";
+        if (!editor.AnimationSays.Contains($"{Core.Animation.AnimationGlb.FileName}: Walk", StringComparison.Ordinal))
+            return $"the editor does not say the Reload came from the glb's Walk: '{editor.AnimationSays}'";
+        if (editor.GlbTake != "Walk") return $"the animation chosen shows as '{editor.GlbTake}' rather than Walk";
+
+        Settle(editor.RestoreAnimationCommand.ExecuteAsync(null), "putting the Reload back after the glb");
+        File.Delete(shown);
+        return before.AsSpan().SequenceEqual(File.ReadAllBytes(reload.FullPath))
+            ? null
+            : "putting the Reload back after the glb did not write the file the extract wrote";
+    }
+
     private static bool Shows(MainViewModel model, Core.Pack.WorkspaceFile file)
         => WaitWhile(
             () => !Showing(model.Editor.Edited, file) || !Showing(model.Editor.Original, file),
@@ -4339,6 +4582,36 @@ internal static class SelfTest
         return WaitWhile(
             () => !string.Equals(model.Detail?.Tree.Record.Slug, slug, StringComparison.OrdinalIgnoreCase),
             60_000);
+    }
+
+    /// Whether two clips move the same things the same way, which is what says a swap landed.
+    ///
+    /// Sampled rather than compared curve by curve: a motion fitted to another length is the same
+    /// shape over a different clock, and a motion retargeted onto another rig keeps some curves and
+    /// drops others, so neither the key times nor the curve count is the question. Where the objects
+    /// actually are through the clip is.
+    private static bool Same(Core.Preview.Motion a, Core.Preview.Motion b)
+    {
+        foreach (var at in new[] { 0f, 0.25f, 0.5f, 0.75f, 1f })
+        {
+            var left = a.Pose(a.Length * at);
+            var right = b.Pose(b.Length * at);
+            if (left.Count != right.Count) return false;
+
+            foreach (var (path, there) in left)
+            {
+                if (!right.TryGetValue(path, out var here)) return false;
+                if (Apart(there.Position, here.Position) || Apart(there.Rotation, here.Rotation)
+                    || Apart(there.Scale, here.Scale)) return false;
+            }
+        }
+
+        return true;
+
+        static bool Apart(float[]? x, float[]? y)
+            => x is not null && y is not null
+                && x.Length == y.Length
+                && x.Where((v, i) => Math.Abs(v - y[i]) > 1e-4f).Any();
     }
 
     private static int CountRows(IEnumerable<TreeNode> nodes)

@@ -554,7 +554,7 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
         SelectedWorkspace = Workspaces.FirstOrDefault(w => w.Directory == chosen) ?? Workspaces.FirstOrDefault();
         OnPropertyChanged(nameof(CanPack));
         Status = Workspaces.Count == 0
-            ? $"Nothing extracted yet. Weapons written from Browse land in {root}."
+            ? $"Nothing extracted yet. Items written from Browse land in {root}."
             : $"{Workspaces.Count} extracted";
     }
 
@@ -580,6 +580,7 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
     {
         Original.Clear("Nothing selected.");
         Edited.Clear("Nothing selected.");
+        ShowAnimationChoice(value);
         if (value is null) return;
 
         await CompareAsync(value);
@@ -607,6 +608,13 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
                 // workspace of thirty files with the arrow keys, or a watcher firing while one is
                 // being read. Whatever this would load is already out of date.
                 if (SelectedFile != file) return;
+
+                // An animation is shown played by the model it moves, not as a file of its own.
+                if (file.Target.Class == nameof(AssetClassID.AnimationClip))
+                {
+                    await CompareAnimationAsync(bundles, file);
+                    return;
+                }
 
                 // Read here rather than on the thread below: the list belongs to the window and is
                 // rebuilt on it whenever the workspace is read again.
@@ -891,6 +899,31 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
         {
             Status = "Choose a workspace first, and these will go into it.";
             return;
+        }
+
+        // A .glb dropped while an animation is selected is an animation for it, unless it is named
+        // like one of the workspace's models — which is then what it replaces, as before.
+        if (IsAnimation && paths.Count == 1
+            && string.Equals(Path.GetExtension(paths[0]), ".glb", StringComparison.OrdinalIgnoreCase)
+            && Destination(paths[0]) is null)
+        {
+            _ = UseGlbFile(paths[0], take: null);
+            return;
+        }
+
+        // A .anim going into an animation is fitted to this item rather than copied: one from another
+        // workspace names that item's objects, which this one does not have.
+        var animations = paths
+            .Where(p => string.Equals(Path.GetExtension(p), ".anim", StringComparison.OrdinalIgnoreCase) && File.Exists(p))
+            .Select(p => (Path: p, Slot: Destination(p)))
+            .Where(a => a.Slot is { Operation: PackOperations.ReplaceAnimation })
+            .Select(a => (a.Path, a.Slot!))
+            .ToList();
+        if (animations.Count > 0)
+        {
+            _ = UseAnimFiles(workspace, animations);
+            paths = paths.Except(animations.Select(a => a.Path)).ToList();
+            if (paths.Count == 0) return;
         }
 
         var (placed, refused) = (new List<string>(), new List<string>());

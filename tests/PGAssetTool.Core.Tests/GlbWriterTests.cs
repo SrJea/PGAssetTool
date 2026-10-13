@@ -274,4 +274,56 @@ public class GlbWriterTests : IDisposable
         var (json, _) = WriteAndRead(Triangle());
         Assert.False(json.TryGetProperty("skins", out _));
     }
+
+    [Fact]
+    public void ANormalThatIsNotANumberStillWritesAFile()
+    {
+        // avatar_gunslinger's body ships two of these. Bounding the normals as well as the positions
+        // put a NaN into the JSON, which cannot hold one, and the whole extract failed over it.
+        var mesh = Triangle();
+        mesh.Attributes[VertexAttribute.Normal][3] = float.NaN;
+
+        var (json, binary) = WriteAndRead(mesh);
+        var attributes = json.GetProperty("meshes")[0].GetProperty("primitives")[0].GetProperty("attributes");
+
+        var normals = Floats(json, binary, attributes.GetProperty("NORMAL").GetInt32(), 3);
+        Assert.All(normals, n => Assert.True(float.IsFinite(n)));
+        Assert.Equal([0f, 1f, 0f], normals[3..6]);
+
+        var accessor = json.GetProperty("accessors")[attributes.GetProperty("NORMAL").GetInt32()];
+        Assert.False(accessor.TryGetProperty("min", out _));
+    }
+
+    [Fact]
+    public void SubmeshesSharingAVertexBufferComeBackSharingIt()
+    {
+        // Every submesh of a Unity mesh indexes the one vertex buffer, and that is how it is written
+        // out. Read back a primitive at a time, each submesh brought its own copy of the vertices:
+        // #1200's Space Dessert went back into the game with twice the vertices it came out with.
+        var mesh = Triangle() with
+        {
+            VertexCount = 4,
+            Attributes = new Dictionary<VertexAttribute, float[]>
+            {
+                [VertexAttribute.Position] = [0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 1, 0],
+                [VertexAttribute.Normal] = [0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1],
+                [VertexAttribute.TexCoord0] = [0, 0, 1, 0, 0, 1, 1, 1],
+            },
+            Indices = [0, 1, 2, 1, 3, 2],
+            SubMeshes = [new SubMesh(0, 3, Topology: 0, BaseVertex: 0), new SubMesh(3, 3, Topology: 0, BaseVertex: 0)],
+        };
+
+        var path = Path.Combine(_directory, "two.glb");
+        GlbWriter.Write(mesh, path);
+        var read = Import.Meshes.GltfMeshReader.Read(path);
+
+        Assert.Equal(4, read.VertexCount);
+        Assert.Equal(2, read.SubMeshes.Count);
+        Assert.Equal(12, read.Attributes[VertexAttribute.Position].Length);
+
+        // Both triangles still land on the vertices they started on, in either winding.
+        var triangles = read.Indices.Chunk(3).Select(t => t.Order().ToArray()).ToList();
+        Assert.Equal([0, 1, 2], triangles[0]);
+        Assert.Equal([1, 2, 3], triangles[1]);
+    }
 }

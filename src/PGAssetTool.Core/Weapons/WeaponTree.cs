@@ -98,7 +98,12 @@ public sealed record WeaponTree(
     IconLocation? Icon,
     IReadOnlyList<string> UnresolvedReasons,
     IReadOnlyList<MeshTextures> MeshTextures,
-    AssetNode? MainMesh);
+    AssetNode? MainMesh)
+{
+    /// The path the game loads the prefab by, under whichever of its kind's roots it is actually
+    /// filed: `Weapons/Weapon834`, `Boots/BerserkBoots_up1`. Null for a tree made without one.
+    public string? PrefabPath { get; init; }
+}
 
 /// Assembles everything belonging to one weapon. Resolution happens on demand: the catalogs plus
 /// the single bundle holding the prefab are enough, so nothing is precomputed.
@@ -145,28 +150,8 @@ public sealed class WeaponResolver(BundleSet bundles, GameCatalogs catalogs)
         if (prefabBundle is not null)
         {
             var file = bundles.Open(prefabBundle);
-
-            // The object the game itself loads under that path, out of the bundle's own table of
-            // what it holds. A search by name was what this did, and a name is not unique inside a
-            // bundle: every one of the 50 pets that appeared to carry no model has *two* objects
-            // called `pet_wolf` in `pt_pet_wolf` — the 172-object one with `pet_wolf_mesh` under
-            // `Pets/Content/pet_wolf`, and an empty 4-object one under `Pets/Infos/pet_wolf` — and
-            // the search took whichever came first. All 50 find their model this way, and so do
-            // three weapons that were quietly short of one: #extracting_ray_pistol reached two
-            // meshes where the game's own answer reaches four.
-            //
-            // Measured over all 2,624 items before changing it: the two answers agree for 2,466,
-            // the table names a GameObject for every single one, and of the 158 that differ, 69
-            // gain a model, 88 reach the same meshes by another copy of the same object, and one —
-            // royale_car_monster_truck — reaches seven meshes where the name found ten. That one
-            // goes to the table as well: it is what the game loads for that path, and the name is
-            // a guess that happened to land on a fuller object.
             var named = prefabPath[(prefabPath.LastIndexOf('/') + 1)..];
-            var root = _contents.Locate(prefabBundle, prefabPath) is { Class: AssetClassID.GameObject } loaded
-                ? file.file.GetAssetInfo(loaded.PathId)
-                // Only when the table names none, which nothing in this version of the game does.
-                : ReferenceWalker.FindByName(
-                    bundles.Context, file, AssetClassID.GameObject, named, StringComparison.OrdinalIgnoreCase);
+            var root = Prefab(file, prefabBundle, prefabPath);
 
             if (root is null)
                 unresolved.Add($"'{named}' was not found inside bundle '{prefabBundle}'");
@@ -175,7 +160,7 @@ public sealed class WeaponResolver(BundleSet bundles, GameCatalogs catalogs)
                 // found exactly as before — a texture a component names is still a texture — and it
                 // is the object itself that does not appear. See Replaceable for which and why.
                 assets = ReferenceWalker
-                    .Closure(bundles.Context, file, root.PathId, Graph.Resolve, skip: Opaque)
+                    .Closure(bundles.Context, file, root.Value, Graph.Resolve, skip: Opaque)
                     .Where(a => Pack.Replaceable.CanShow(a.Class))
                     .ToList();
         }
@@ -209,7 +194,40 @@ public sealed class WeaponResolver(BundleSet bundles, GameCatalogs catalogs)
         return new WeaponTree(
             record, displayName ?? record.Slug, prefabBundle, assets, skins, related, icon, unresolved,
             dressing,
-            prefabBundle is null ? null : MainMesh(prefabBundle, assets, dressing, record.Slug, record.PrefabName));
+            prefabBundle is null ? null : MainMesh(prefabBundle, assets, dressing, record.Slug, record.PrefabName))
+        {
+            PrefabPath = prefabPath,
+        };
+    }
+
+    /// The GameObject the game loads for this path, as a path id.
+    ///
+    /// The bundle's own container table first, because a name is not unique inside a bundle: a
+    /// pet's bundle holds `Pets/Content/pet_alien_cat`, the model, and `Pets/Infos/pet_alien_cat`,
+    /// a description of it, and both GameObjects are called `pet_alien_cat`. Asked by name, the
+    /// walk started from whichever came first in the file — the description, for 50 of the 112
+    /// pets — and the pet came out as a GameObject and a Transform with no model at all.
+    ///
+    /// Measured over all 2,624 items before this was changed: the two answers agree for 2,466, the
+    /// table names a GameObject for every single one, and of the 158 that differ, 69 gain a model,
+    /// 88 reach the same meshes by another copy of the same object, and one —
+    /// `royale_car_monster_truck` — reaches seven meshes where the name found ten. That one goes to
+    /// the table as well: it is what the game loads for that path, and the name is a guess that
+    /// happened to land on a fuller object. Three weapons were quietly short of a mesh with the 50
+    /// pets.
+    ///
+    /// By the leaf of the path, without minding case, only when the table names nothing. The
+    /// registry's id and the prefab's own name are the same string for a weapon and only nearly
+    /// for everything else: `BerserkBoots_Up1` is filed as `BerserkBoots_up1`, which the lookup
+    /// finds and an exact search for the id does not.
+    private long? Prefab(AssetsFileInstance file, string bundle, string assetPath)
+    {
+        if (_contents.Locate(bundle, assetPath) is { Class: AssetClassID.GameObject } listed)
+            return listed.PathId;
+
+        var named = assetPath[(assetPath.LastIndexOf('/') + 1)..];
+        return ReferenceWalker.FindByName(
+            bundles.Context, file, AssetClassID.GameObject, named, StringComparison.OrdinalIgnoreCase)?.PathId;
     }
 
     /// Everything else the game files under this item's name.
@@ -226,11 +244,32 @@ public sealed class WeaponResolver(BundleSet bundles, GameCatalogs catalogs)
                 .Where(p => p != prefabPath
                     && !p.StartsWith("WeaponSkinsV2/WeaponSkinAssets/", StringComparison.Ordinal));
 
+        // Another item whose id is this one and more owns whatever names it. `pet_horse` and
+        // `pet_horse_figure` are two pets, and every path of the second one names the first as well
+        // by the rule below — so Parade Horse collected Knight Figure's prefab and icons, and a pack
+        // made from it could rewrite another item altogether. Nine items in the game have a
+        // neighbour like that: Evil Dragon and Dragon Form Glider, Block Car and Block Racer,
+        // Foundation Spec Ops and three of its squad.
+        var longer = OtherIds()
+            .Where(id => id.Length > record.Slug.Length
+                && id.Contains(record.Slug, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
         return catalogs.Lookup.Entries
             .Select(e => e.Key)
-            .Where(p => p != prefabPath && Names(p, record.Slug))
+            .Where(p => p != prefabPath && Names(p, record.Slug) && !longer.Any(id => Names(p, id)))
             .ToList();
     }
+
+    /// Every id the catalogue knows outside the weapons, once per resolver.
+    private IReadOnlyList<string> OtherIds()
+        => _otherIds ??= [.. catalogs.Kinds
+            .Where(k => k != ItemKinds.Weapon)
+            .SelectMany(k => catalogs.Of(k))
+            .Select(r => r.Slug)
+            .Distinct(StringComparer.OrdinalIgnoreCase)];
+
+    private IReadOnlyList<string>? _otherIds;
 
     /// A related path, with the object behind it when that object is one this tool writes back.
     ///
@@ -294,16 +333,26 @@ public sealed class WeaponResolver(BundleSet bundles, GameCatalogs catalogs)
         var meshes = assets.Where(a => a.Class == AssetClassID.Mesh).ToList();
         if (meshes.Count <= 1) return meshes.FirstOrDefault();
 
-        // Stable, so meshes that score the same keep the order the walk found them in — except
-        // that between two the data cannot tell apart, the arms lose. That is the one place a name
-        // is trusted outright, and it is a name the game gives every weapon rather than one it
-        // gives this weapon: 84 of 85 sampled across the catalogue carry a mesh called exactly
-        // this. It settles the handful the tests above cannot, where a weapon is called one thing
-        // and its art another — #1081 Hammer Sword is 'class_knight_hammer' wearing
-        // 'brave_lion_map' out of a shared bundle, and nothing about it says which mesh is a sword.
+        // The arms are never the weapon, so they go last whatever they score, and the scoring
+        // decides the rest. That is the one place a name is trusted outright, and it is a name the
+        // game gives every weapon rather than one it gives this weapon: 398 of 400 prefabs carry a
+        // mesh called exactly this. A weapon whose only mesh is the arms — #121 Dater_Arms, which
+        // is a pair of fists — is answered above, where one mesh is the answer.
+        //
+        // **It used to be a tie-break and that was not enough.** The score gives four points for
+        // wearing a texture out of the weapon's own bundle, and the arms of sixteen weapons do:
+        // their generic mesh outscored the weapon's own and #7 AK47, #300 Stormtrooper Exoskeleton
+        // and fourteen others came up as a pair of hands. Measured over all 1,523: making the arms
+        // lose outright moves exactly those sixteen, each onto the mesh named after the weapon —
+        // AK47_Mesh1, exoskeleton_1_Mesh, Crossbow_Mesh — and moves nothing else.
+        //
+        // Stable below that, so meshes that score the same keep the order the walk found them in.
+        // The scoring still settles the hard ones, where a weapon is called one thing and its art
+        // another — #1081 Hammer Sword is 'class_knight_hammer' wearing 'brave_lion_map' out of a
+        // shared bundle, and nothing about it says which mesh is a sword.
         return meshes
-            .OrderByDescending(Score)
-            .ThenBy(m => string.Equals(m.Name, Arms, StringComparison.OrdinalIgnoreCase) ? 1 : 0)
+            .OrderBy(m => string.Equals(m.Name, Arms, StringComparison.OrdinalIgnoreCase) ? 1 : 0)
+            .ThenByDescending(Score)
             .First();
 
         bool Called(string what)

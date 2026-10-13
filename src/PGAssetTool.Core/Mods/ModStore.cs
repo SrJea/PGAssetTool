@@ -369,6 +369,37 @@ public sealed class ModStore
         return true;
     }
 
+    /// What a backup holds, by MD5.
+    ///
+    /// Usually the hash it is filed under, since a cache directory is named after its bundle's MD5 —
+    /// but not for a bundle that was already modified when it was backed up, which is what a forced
+    /// install of a game modded by something else leaves. Asked whether a live bundle is the one the
+    /// backup would put back, the name then says no every time, and every reconcile copied that
+    /// bundle over an identical copy of itself and said it had put it back.
+    ///
+    /// Hashed once and kept beside the backup, with the size and time it was taken from, so a
+    /// reconcile does not read every backup through to answer it. Null when there is no backup.
+    public string? BackupMd5(CacheKind cache, string bundle, string hash)
+    {
+        var backup = BackupPathFor(cache, bundle, hash);
+        var file = new FileInfo(backup);
+        if (!file.Exists) return null;
+
+        var stamp = $"{file.Length} {file.LastWriteTimeUtc.Ticks}";
+        var kept = backup + ".md5";
+        try
+        {
+            var said = File.Exists(kept) ? File.ReadAllText(kept).Split(' ', 2) : [];
+            if (said.Length == 2 && said[1] == stamp) return said[0];
+        }
+        catch (IOException) { }
+
+        var md5 = BundleIntegrity.Md5(backup);
+        try { Settings.AtomicFile.WriteAllText(kept, $"{md5} {stamp}"); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+        return md5;
+    }
+
     /// A game update replaces a bundle and gives it a new hash directory. The modified copy under
     /// the old hash and the backup beside it are both dead weight at that point.
     ///

@@ -31,7 +31,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     {
         Preview = new PreviewViewModel(_alpha);
         Preview.PropertyChanged += OnPreviewChanged;
-        Editor = new EditorViewModel(() => _bundles, _reading, _alpha);
+        Editor = new EditorViewModel(() => _bundles, _reading, _alpha) { Catalogs = () => _catalogs };
         Editor.PackRequested += BuildPack;
 
         Manager = new ManagerViewModel(() => _installation);
@@ -271,8 +271,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     /// registry the list is filled from and nothing else.
     public ObservableCollection<ItemKind> Kinds { get; } = [];
 
-    /// Whether there is more than one kind to choose between, which there is not for now — see
-    /// LoadAsync — so the picker stays out of the way until there is.
+    /// Whether there is more than one kind to choose between, so the picker stays out of the way of
+    /// a game that turns out to have nothing but weapons.
     public bool OffersKinds => Kinds.Count > 1;
 
     [ObservableProperty] private ItemKind _kind = ItemKinds.Weapon;
@@ -353,17 +353,12 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             // back by name: a reload rebuilds these objects, and the one held before it is not the
             // one in the list afterwards.
             var was = Kind.Name;
-            // Every kind the game has something in. Weapons only for a long while — the others were
-            // put aside until weapons were finished, and offering them meant answering for them —
-            // and the command line went on reading them the whole time, which is how people came to
-            // be modding boots through it before the window would show one. Measured before opening
-            // it: hats, capes, masks, boots, gliders, transports and avatars resolve a bundle, a
-            // model and an icon for every item they have, in 6 to 19ms each against a weapon's 38.
-            // Pets are the exception: half of them are stub prefabs carrying no model of their own
-            // — 31 of 60 looked at had one — because the model belongs to the pet their registry
-            // entry names. They are offered as they are rather than held back, since the icon and
-            // the textures of such a pet are its own and can be worked on; following that name is
-            // its own piece of work and has not been done.
+            // Every kind. They were held back to weapons alone while weapons were finished; the
+            // others resolve, preview, extract, pack and install through the same code, and the
+            // command line has been answering for them all along, which is how people came to be
+            // modding boots through it before the window would show one. Measured before opening
+            // it: every non-weapon kind resolves a bundle, a model and an icon for every item it
+            // has, in 6 to 19ms each against a weapon's 38.
             Kinds.Clear();
             foreach (var kind in _catalogs!.Kinds) Kinds.Add(kind);
             OnPropertyChanged(nameof(OffersKinds));
@@ -399,7 +394,10 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                 CrashReport = crash;
                 CrashNotice = $"The last session closed unexpectedly. What happened is written in {Path.GetFileName(crash)} — sending that file with a report is what makes it fixable.";
             }
-            Status = $"{_catalogs.Items.Count} weapons";
+            var others = _catalogs.Kinds.Where(k => k != ItemKinds.Weapon).Sum(k => _catalogs.Of(k).Count);
+            Status = others > 0
+                ? $"{_catalogs.Items.Count} weapons, {others} other items in {_catalogs.Kinds.Count - 1} kinds"
+                : $"{_catalogs.Items.Count} weapons";
             OnPropertyChanged(nameof(GameDescribed));
         }
         catch (Exception ex)
@@ -415,7 +413,9 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     /// Re-reads the game from scratch, for after a game update or an external edit.
     public async Task ReloadAsync()
     {
-        var wanted = Selected?.Record.GameNumber;
+        // By kind and id rather than by number: only weapons are numbered, and every other item's
+        // number is the same nought, so a reload put the selection on the first hat in the list.
+        var wanted = Selected?.Record is { } record ? (record.Kind, record.Slug) : ((ItemKind, string)?)null;
 
         // Closed under the lock everything reads through. A preview or a resolve that is running
         // right now holds it and is reading the BundleSet on a thread of its own; disposing it from
@@ -439,8 +439,9 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         await LoadAsync();
 
         // Put the reader back where it was, so a reload is not also a loss of place.
-        if (wanted is { } number)
-            Selected = Weapons.FirstOrDefault(w => w.Record.GameNumber == number);
+        if (wanted is var (kind, slug))
+            Selected = Weapons.FirstOrDefault(w => w.Record.Kind == kind
+                && string.Equals(w.Record.Slug, slug, StringComparison.OrdinalIgnoreCase));
     }
 
     partial void OnSearchChanged(string value)
@@ -537,10 +538,16 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private async Task ExtractWeapon()
     {
-        if (_tree is null || _bundles is null) { Status = "Select a weapon first."; return; }
+        if (_tree is null || _bundles is null) { Status = "Select an item first."; return; }
 
         var tree = _tree;
-        await RunExclusively("extracting the weapon", async () =>
+        if (ReferenceEquals(ChosenSkin, SkinChoice.All))
+        {
+            await ExtractEveryLook(tree);
+            return;
+        }
+
+        await RunExclusively($"extracting the {tree.Record.Kind.Name.ToLowerInvariant()}", async () =>
         {
             var version = GameVersion.Of(_bundles.Context, _bundles.Game);
 
@@ -560,6 +567,35 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             Status = $"{export.Assets.Select(a => a.Path).Distinct(StringComparer.OrdinalIgnoreCase).Count()} files written to {export.Directory}"
                 + (export.Skipped.Count > 0 ? $", {export.Skipped.Count} skipped" : "")
                 + (export.Notes is { Count: > 0 } notes ? ".  " + string.Join("  ", notes) : "");
+        });
+    }
+
+    /// Writes the item as it comes and then each of its skins, a workspace apiece. See
+    /// WeaponExporter.ExportEveryLook.
+    private async Task ExtractEveryLook(WeaponTree tree)
+    {
+        await RunExclusively($"extracting the {tree.Record.Kind.Name.ToLowerInvariant()} and its skins", async () =>
+        {
+            var version = GameVersion.Of(_bundles!.Context, _bundles.Game);
+            // Made here, so what it reports arrives on the window's thread.
+            var progress = new Progress<string>(said => Status = said);
+            IProgress<string> report = progress;
+
+            var looks = await Task.Run(() => WeaponExporter.ExportEveryLook(
+                _bundles, tree, WorkspaceRoot, _settings.Author, version,
+                opaque: _settings.OpaqueTextures, maskUnused: _settings.MaskUnusedTextures,
+                progress: (at, of, name) => report.Report($"Extracting {at} of {of}: {name}…")));
+
+            if (looks.LastOrDefault(l => l.Export is not null)?.Export is { } last) LastExport = last.Directory;
+            Editor.Rescan(WorkspaceRoot);
+            Manager.Refresh();
+
+            var failed = looks.Where(l => l.Export is null).ToList();
+            Status = $"{looks.Count - failed.Count} of {looks.Count} written, each a workspace of its own, in {WorkspaceRoot}"
+                + (failed.Count > 0
+                    ? ". Not written: " + string.Join("; ", failed.GroupBy(f => f.Failed)
+                        .Select(g => $"{string.Join(", ", g.Select(f => f.Name))} ({g.Key})"))
+                    : ".");
         });
     }
 
@@ -932,16 +968,13 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     {
         if (_catalogs is not { } catalogs) return (null, null);
 
-        // A weapon by its number, anything else by the id its own registry knows it as — the number
-        // is a weapon's and is zero for every other kind. Looked up at all because a pack carries
-        // the key its author's game had: an installation whose registry has moved on answers for
-        // itself, and a pack from before any of this carries nothing to translate.
+        // A weapon by its number, anything else by the id the game knows it as — the id the pack
+        // was filed under, or failing that the prefab it was made from, which for everything but a
+        // weapon is the same string in its own capitals. The keys the pack recorded are the last
+        // resort, for an item this installation does not have.
         var record = subject.Kind == Core.Pack.PackKind.Weapon
             ? catalogs.Items.ByGameNumber(subject.Number)
-            : Core.Catalog.ItemKinds.ByName(subject.Kind) is { } kind
-                ? catalogs.Of(kind).FirstOrDefault(
-                    r => string.Equals(r.Slug, subject.Id, StringComparison.OrdinalIgnoreCase))
-                : null;
+            : OtherNamed(catalogs, subject);
 
         var variant = record is null || subject.Variant.Length == 0
             ? null
@@ -953,6 +986,16 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
         string? Say(string? key)
             => key is { Length: > 0 } ? catalogs.Localization.Translate(key) : null;
+    }
+
+    /// An item that is not a weapon, by what a pack recorded of it.
+    private static WeaponRecord? OtherNamed(GameCatalogs catalogs, Core.Pack.PackSubject subject)
+    {
+        if (ItemKinds.ByName(subject.Kind) is not { } kind || kind == ItemKinds.Weapon) return null;
+
+        var of = catalogs.Of(kind);
+        return of.FirstOrDefault(r => string.Equals(r.Slug, subject.Prefab, StringComparison.OrdinalIgnoreCase))
+            ?? of.FirstOrDefault(r => string.Equals(r.Slug, subject.Id, StringComparison.OrdinalIgnoreCase));
     }
 
     private void Remember()
@@ -1190,6 +1233,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     {
         SkinChoices.Clear();
         SkinChoices.Add(SkinChoice.None);
+        if (tree?.Skins.Count > 0) SkinChoices.Add(SkinChoice.All);
         foreach (var skin in tree?.Skins ?? [])
             SkinChoices.Add(new SkinChoice(
                 skin.Record.Id, skin.DisplayName ?? skin.Record.Id, skin.Model is not null));
@@ -1597,6 +1641,9 @@ public sealed record LanguageOption(string Bundle, string Name)
 public sealed record SkinChoice(string? Id, string Name, bool HasModel)
 {
     public static SkinChoice None { get; } = new(null, "(no skin)", false);
+
+    /// The item as it comes and every skin, each into a workspace of its own.
+    public static SkinChoice All { get; } = new(null, "(all of them, each a workspace of its own)", false);
 
     public override string ToString() => HasModel ? $"{Name}  — its own model" : Name;
 }
