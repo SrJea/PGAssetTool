@@ -26,6 +26,17 @@ public sealed class MeshView : Control
 
     /// The model to size and centre the view by, when an animation is moving the one being drawn.
     /// Null means the view is framed by whatever is on screen, which is the ordinary case.
+    public static readonly StyledProperty<bool?> ShelledProperty =
+        AvaloniaProperty.Register<MeshView, bool?>(nameof(Shelled));
+
+    /// Whether to leave out the triangles facing away, when the model says less about that than
+    /// the parts it was joined from do. See MeshRenderer.Render.
+    public bool? Shelled
+    {
+        get => GetValue(ShelledProperty);
+        set => SetValue(ShelledProperty, value);
+    }
+
     public static readonly StyledProperty<UnityMesh?> FramingProperty =
         AvaloniaProperty.Register<MeshView, UnityMesh?>(nameof(Framing));
 
@@ -92,7 +103,7 @@ public sealed class MeshView : Control
         // answer, and answering it wrongly threw away an angle somebody had just chosen; whoever
         // owns the camera decides.
         AffectsRender<MeshView>(
-            MeshProperty, TexturesProperty, CameraProperty, FramingProperty, StandingProperty);
+            MeshProperty, TexturesProperty, CameraProperty, FramingProperty, StandingProperty, ShelledProperty);
     }
 
     /// Set while the middle button is down, which pans instead of turning.
@@ -200,7 +211,7 @@ public sealed class MeshView : Control
             _target.Resize(width, height);
         }
 
-        MeshRenderer.Render(mesh, Camera, _target, Textures, Framing, Viewpoint);
+        MeshRenderer.Render(mesh, Camera, _target, Textures, Framing, Viewpoint, Shelled);
 
         using (var locked = _bitmap.Lock())
             System.Runtime.InteropServices.Marshal.Copy(_target.Bgra, 0, locked.Address, _target.Bgra.Length);

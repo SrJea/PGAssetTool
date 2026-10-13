@@ -98,6 +98,55 @@ public sealed class Skeleton
         return Unskinned(bundles, file, meshPathId, whole);
     }
 
+    /// Whether the game draws this mesh at all.
+    ///
+    /// **A MeshFilter says which mesh; a MeshRenderer beside it is what draws one.** A filter with
+    /// no renderer on its object is a collider's geometry — `fps_all_terrain_vehicle_collider` says
+    /// so in its name, #28 Tree calls its one `box`, and the pair of arms a few weapons carry under
+    /// `FPS_PLAYER_Arm_left`/`_Right` are the same thing. The game draws none of them and nor should
+    /// a preview: they are the white slab in the middle of the model that was reported against #7,
+    /// #11, #14 and #28. A renderer switched off is not drawn either.
+    ///
+    /// Asked of the parts drawn beside a model rather than of the model on the row, which is shown
+    /// because somebody asked for it whatever draws it.
+    public static bool Drawn(BundleSet bundles, string bundle, long meshPathId)
+    {
+        AssetsFileInstance file;
+        try { file = bundles.Open(bundle); }
+        catch (Exception e) when (e is IOException or FileNotFoundException) { return false; }
+
+        foreach (var info in file.file.AssetInfos)
+        {
+            var skinned = info.TypeId == (int)AssetClassID.SkinnedMeshRenderer;
+            if (!skinned && info.TypeId != (int)AssetClassID.MeshFilter) continue;
+
+            var field = bundles.Context.Deserialize(file, info);
+            if (field is null || field["m_Mesh"]["m_PathID"].AsLong != meshPathId) continue;
+
+            if (skinned)
+            {
+                if (field["m_Enabled"].IsDummy || field["m_Enabled"].AsInt != 0) return true;
+                continue;
+            }
+
+            var owner = file.file.GetAssetInfo(field["m_GameObject"]["m_PathID"].AsLong);
+            var holder = owner is null ? null : bundles.Context.Deserialize(file, owner);
+            if (holder is null) continue;
+
+            foreach (var component in holder["m_Component"]["Array"].Children)
+            {
+                var id = component["component"]["m_PathID"].AsLong;
+                if (file.file.GetAssetInfo(id) is not { TypeId: (int)AssetClassID.MeshRenderer } found) continue;
+
+                var renderer = bundles.Context.Deserialize(file, found);
+                if (renderer is null) continue;
+                if (renderer["m_Enabled"].IsDummy || renderer["m_Enabled"].AsInt != 0) return true;
+            }
+        }
+
+        return false;
+    }
+
     /// A mesh nothing skins, moved by moving the object it hangs off.
     ///
     /// A MeshFilter names the mesh, and a clip moves the MeshFilter's own transform by name, so that

@@ -1092,19 +1092,17 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             || (name.StartsWith("player", StringComparison.OrdinalIgnoreCase)
                 && name.Length > 6 && char.IsDigit(name[^1]));
 
-    /// Whether a part of the prefab is one of the model or something standing in for it.
+    /// Whether the game draws this mesh beside the model, which is the only thing that decides
+    /// whether a preview should.
     ///
-    /// **A single quad is a marker, not a part.** The prefabs are full of them — `Bone_Root`,
-    /// `Bone_Clips`, `Bone_Shutter`, `Bone_Bullet`, 26 of them across 618 items — put where a
-    /// magazine leaves or a shell ejects so that something in the game can be told where that is.
-    /// Drawn, they are a white flake hanging in the model, and five of the 26 are read as carrying
-    /// an outline shell, which refused the join outright and left #7 and #31 showing the gun alone.
-    ///
-    /// A part that really does carry a shell is left out rather than refusing the rest: whether to
-    /// cull by facing is decided for a whole mesh, so a shelled part cannot be joined to an unshelled
-    /// one — but the other parts can still be joined to each other. 12 of 618 items have one.
-    private static bool IsPart(UnityMesh mesh)
-        => mesh.Indices.Length / 3 > 2 && !mesh.CarriesAnOutline;
+    /// A MeshFilter with no MeshRenderer is a collider's geometry, and the prefabs are full of
+    /// them: `Bone_Root`, `Bone_Clips`, `Bone_Shutter` and `Bone_Bullet` mark where a magazine
+    /// leaves or a shell ejects, #28 Tree calls its one `box`, and a few weapons carry a second
+    /// pair of arms that way. Drawn, each is a white slab in the middle of the model, which is what
+    /// was reported against #7, #11, #14 and #28. Measured over 618 items: of the 26 parts small
+    /// enough to be a marker, 21 are not drawn by anything and the other five are real —
+    /// `avatar_agent_harn`'s eye, a rover's glass — so the renderer answers this and the size of a
+    /// part says nothing about it.
 
     /// The object this item's own prefab hangs from, which every part has to be read under.
     ///
@@ -1163,9 +1161,15 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
                 var field = _bundles!.Context.Deserialize(file, info);
                 if (field is null || UnityMesh.Read(field) is not { VertexCount: > 0 } mesh) continue;
-                if (!IsPart(mesh)) continue;
-                // Under this item's own prefab, so every part is placed by one hierarchy.
-                if (Under(bundle, other.PathId) is not { } bones) continue;
+                if (!Skeleton.Drawn(_bundles, bundle, other.PathId)) continue;
+
+                // Under this item's own prefab, and only there. A bundle holds many items and
+                // their meshes are all reachable: `cape_cloak_of_night` was being shown wearing
+                // `cape_vaneuvering_module_mesh`, another cape entirely, because nothing said
+                // whose hierarchy it was in. The model on the row is the one exception — it is
+                // shown because somebody asked for it, wherever it turns out to hang.
+                if (PrefabRoot is not { } root) continue;
+                if (Skeleton.For(_bundles, bundle, other.PathId, root, whole: true) is not { } bones) continue;
 
                 with.Add((mesh, bones, !arms));
                 wearing.AddRange(TexturesFor(_tree.MeshTextures

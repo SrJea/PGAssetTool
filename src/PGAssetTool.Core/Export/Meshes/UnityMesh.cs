@@ -90,15 +90,15 @@ public sealed record UnityMesh
     /// belongs. `BaseVertex` is folded into the indices here — the renderer does not add it, the glb
     /// writer does — so the result needs it from nobody.
     ///
-    /// Answers null if any part carries an outline shell. Whether to cull by facing is decided for a
-    /// whole mesh (`MeshRenderer`), and two parts can disagree; of the game's 2,624 models 13 are
-    /// shelled and no weapon is among them, so this is the case that does not arise rather than one
-    /// worth guessing at. The caller shows the one mesh it would have shown.
+    /// A part that carries an outline shell comes too. Whether to cull by facing is a property of a
+    /// whole mesh and is lost in the join — a shell that filled its own part's box no longer fills
+    /// the whole item's — so the caller works it out from the parts and tells the renderer.
+    /// `avatar_bugged_cosmus` is why: its body, head and legs each carry one, and left out there was
+    /// nothing of it to see but the arms.
     public static UnityMesh? Combined(string name, IReadOnlyList<UnityMesh> parts)
     {
         if (parts.Count == 0) return null;
         if (parts.Count == 1) return parts[0];
-        if (parts.Any(p => p.CarriesAnOutline)) return null;
 
         var dimensions = new Dictionary<VertexAttribute, int>();
         foreach (var part in parts)

@@ -236,9 +236,18 @@ public static class MeshRenderer
     /// box for the rest pose and the camera's angles for the view, which is what everything in the
     /// tool itself does.
     /// </param>
+    /// <param name="shelled">
+    /// Whether to leave out the triangles facing away, overriding what the mesh says of itself.
+    ///
+    /// The outline shell is a property of a whole mesh, and several meshes of one item are shown
+    /// joined — so the answer has to come from the parts rather than from the join, where a shell
+    /// that filled its own part's box no longer fills the whole item's and stops being found.
+    /// Culling where nothing is shelled costs nothing: a closed model's far side is behind its
+    /// near one either way.
+    /// </param>
     public static void Render(
         UnityMesh mesh, Camera camera, RenderTarget target, IReadOnlyList<PreviewImage?>? textures = null,
-        UnityMesh? framing = null, Viewpoint? viewpoint = null)
+        UnityMesh? framing = null, Viewpoint? viewpoint = null, bool? shelled = null)
     {
         if (target.IsEmpty) return;
 
@@ -281,7 +290,7 @@ public static class MeshRenderer
         Span<float> u = stackalloc float[3];
         Span<float> v = stackalloc float[3];
 
-        var shelled = mesh.CarriesAnOutline;
+        var cull = shelled ?? mesh.CarriesAnOutline;
 
         // Submesh by submesh, because which material draws a triangle is decided by which submesh
         // it belongs to. A mesh with no submeshes recorded is drawn whole.
@@ -314,7 +323,7 @@ public static class MeshRenderer
                     sz[corner] = z;
 
                     shade[corner] = normals is null ? 1f : Lambert(view, upright, normals, vertex);
-                    away[corner] = shelled ? Facing(view, upright, normals!, vertex) : 1f;
+                    away[corner] = cull && normals is not null ? Facing(view, upright, normals, vertex) : 1f;
                     u[corner] = uvs is null ? 0 : uvs[vertex * 2];
                     v[corner] = uvs is null ? 0 : uvs[vertex * 2 + 1];
                 }

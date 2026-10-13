@@ -102,6 +102,10 @@ public sealed partial class PreviewViewModel(AlphaPreference? alpha = null) : Ob
     /// would shrink every weapon to make room for a forearm reaching out of the picture.
     [ObservableProperty] private UnityMesh? _framing;
 
+    /// Whether anything shown carries an outline shell, which the join itself no longer says.
+    /// Null when there is nothing beside the model and the mesh can answer for itself.
+    [ObservableProperty] private bool? _shelled;
+
     /// The model and everything shown with it, at one moment, in the prefab's own space. Null when
     /// there is nothing to show it with, which leaves every other path exactly as it was.
     ///
@@ -386,6 +390,8 @@ public sealed partial class PreviewViewModel(AlphaPreference? alpha = null) : Ob
 
         // With something to be held in, the whole of it moves into the prefab's own space, that
         // being the only space the two share. Framed by the model alone either way.
+        Shelled = _with.Count == 0 ? null
+            : mesh.CarriesAnOutline || _with.Any(w => w.Mesh.CarriesAnOutline);
         Framing = skeleton?.Assembled(mesh) ?? mesh;
         if (Built(null, 0f) is { } together && skeleton is not null)
             (Rest, Framing) = (together,
