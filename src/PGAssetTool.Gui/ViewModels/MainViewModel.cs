@@ -1104,22 +1104,43 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     /// `avatar_agent_harn`'s eye, a rover's glass — so the renderer answers this and the size of a
     /// part says nothing about it.
 
-    /// Whether a part of the prefab is the item's drawn-on shadow rather than the item.
+    /// Whether a part of the prefab is something the item is drawn *with* rather than part of it:
+    /// the shadow under a car, a collider, a pivot marker.
     ///
-    /// 41 of the game's 90 transports carry one — a flat slab under the wheels, named after the
-    /// vehicle with `_shadow` or `_shadows` on the end — and the game draws it through a material
-    /// that makes it a shadow on the ground. The preview has no such material, so it came out as the
-    /// grey box a car was sitting on.
+    /// **A part nothing dresses is one of these, nearly always.** The game draws a car's shadow
+    /// through a material that makes it a shadow on the ground, and the preview has none, so it came
+    /// out as the grey box a car was sitting on — 41 of 90 transports have one. Measured over 2,633
+    /// items: 3,913 of the parts drawn beside a model wear a texture and 263 wear none, and the 263
+    /// are shadows, colliders, `UnityPivot`, `Box001`, `firecracker`, and meshes belonging to other
+    /// items entirely.
     ///
-    /// By the end of the name and not by the word appearing in it: eight items are *called* shadow —
-    /// `sword_of_shadows`, `glider_dense_shadows`, `avatar_the_shadow` — and their own meshes say so
-    /// all the way through. Those are models on the row rather than parts beside one, so this is
-    /// never asked of them, and the suffix would spare them anyway. 43 parts are caught.
-    private static bool IsShadow(string name)
+    /// **Except the ones named after the item**, which are the real parts the game simply paints
+    /// some other way: 26 of the 263, among them `glider_mystery_bug`'s two wings,
+    /// `scorching_split`'s chain, `avatar_party_gummy`'s hair and a dozen of
+    /// `avatar_storms_overlord`'s limbs. Those are kept and drawn plain.
+    ///
+    /// And not even then if the name says what it is. The game calls these `_shadow`, `_shadows`,
+    /// `_shade`, `_shadou` (a car spells it that way), `_collider`, `_colider` and `_holo`, and
+    /// `royale_car_patriot_shadow` is named after its car as surely as a wing is. Eight items are
+    /// *called* shadow — `sword_of_shadows`, `avatar_the_shadow` — and their own meshes say so all
+    /// the way through; those are models on a row rather than parts beside one, so this is never
+    /// asked of them.
+    private static bool IsDecoration(string name, string? slug)
     {
+        string[] said = ["shadow", "shadows", "shade", "shadou", "collider", "colider", "holo"];
         var stem = name.EndsWith("_mesh", StringComparison.OrdinalIgnoreCase) ? name[..^5] : name;
-        return stem.EndsWith("shadow", StringComparison.OrdinalIgnoreCase)
-            || stem.EndsWith("shadows", StringComparison.OrdinalIgnoreCase);
+        if (said.Any(s => stem.EndsWith(s, StringComparison.OrdinalIgnoreCase))) return true;
+
+        // Named after the item it belongs to, which is what tells a wing from a leftover. Compared
+        // without the underscores, since the two are not punctuated alike, and on the first ten
+        // characters, which is enough to tell `glider_mystery_bug` from `royale_pressed_cars_01`.
+        if (slug is not { Length: > 4 }) return true;
+
+        var mine = name.Replace("_", "").ToLowerInvariant();
+        var theirs = slug.Replace("_", "").ToLowerInvariant();
+        var head = Math.Min(10, Math.Min(mine.Length, theirs.Length));
+        return !mine.StartsWith(theirs[..head], StringComparison.Ordinal)
+            && !theirs.StartsWith(mine[..head], StringComparison.Ordinal);
     }
 
     /// The object this item's own prefab hangs from, which every part has to be read under.
@@ -1167,7 +1188,6 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         {
             if (other.PathId == node.PathId) continue;
             if (other.Name.StartsWith("vfx=", StringComparison.OrdinalIgnoreCase)) continue;
-            if (IsShadow(other.Name)) continue;
 
             var arms = AreArms(other.Name);
             if (arms && !ShowArms) continue;
@@ -1190,9 +1210,14 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                 if (PrefabRoot is not { } root) continue;
                 if (Skeleton.For(_bundles, bundle, other.PathId, root, whole: true) is not { } bones) continue;
 
+                // Dressed, or named after the item and so one of its own. See IsDecoration.
+                var pictures = TexturesFor(_tree.MeshTextures
+                    .FirstOrDefault(m => m.MeshPathId == other.PathId));
+                if (pictures?.Any(p => p is not null) != true
+                    && IsDecoration(other.Name, _tree.Record.Slug)) continue;
+
                 with.Add((mesh, bones, !arms));
-                wearing.AddRange(TexturesFor(_tree.MeshTextures
-                        .FirstOrDefault(m => m.MeshPathId == other.PathId))
+                wearing.AddRange(pictures
                     ?? Enumerable.Repeat((PreviewImage?)null, Math.Max(mesh.SubMeshes.Count, 1)));
             }
             catch (Exception)
