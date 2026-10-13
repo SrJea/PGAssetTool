@@ -521,6 +521,29 @@ public sealed class Skeleton
     }
 
     /// Every vertex and normal moved by the same matrix.
+    /// The matrix that takes this skeleton's own space back into the space `mesh` was written in.
+    ///
+    /// It is what `Pose` applies when it is not asked for the prefab's space — the thing that makes
+    /// a model at rest the model as it was read. Handed out because several meshes shown together
+    /// have to be joined in the prefab's space, where they share one, and then taken back into the
+    /// model's own: everything that reads a weapon's facing reads it there. `Facing.LandmarksIn`
+    /// answers in the model's space, and measured against a model in the prefab's the muzzle came
+    /// out at whichever end the two spaces happened to agree on.
+    public float[]? Home(UnityMesh mesh)
+    {
+        if (Bones.Count == 0 || Bones[0] >= Rest.Length) return null;
+        if (Rigid) return Matrix.Inverse(Rest[Bones[0]]);
+        return mesh.BindPoses.Count == 0
+            ? null
+            : Matrix.Inverse(Matrix.Times(Rest[Bones[0]], Matrix.FromRows(mesh.BindPoses[0])));
+    }
+
+    /// The same mesh moved by one matrix, positions and normals alike.
+    public static UnityMesh Moved(UnityMesh mesh, float[] matrix)
+        => mesh.Get(VertexAttribute.Position) is { } positions
+            ? Carried(mesh, positions, matrix)
+            : mesh;
+
     private static UnityMesh Carried(UnityMesh mesh, float[] positions, float[] m)
     {
         var moved = new float[positions.Length];

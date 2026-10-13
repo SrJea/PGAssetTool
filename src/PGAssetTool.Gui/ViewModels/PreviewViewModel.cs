@@ -124,7 +124,15 @@ public sealed partial class PreviewViewModel(AlphaPreference? alpha = null) : Ob
             if (!framing || frames)
                 parts.Add(skeleton.Placed(mesh, motion, time));
 
-        return UnityMesh.Combined(_authored.Name, parts);
+        if (UnityMesh.Combined(_authored.Name, parts) is not { } joined) return null;
+
+        // Joined in the prefab's space, which is the only one the parts share, and then taken back
+        // into the model's own — where everything else that reads a model reads it. A weapon's
+        // facing is worked out against landmarks that answer in the model's space
+        // (`Facing.LandmarksIn`), so measured against a model left in the prefab's the muzzle came
+        // out at whichever end the two happened to agree on, which is why it moved from weapon to
+        // weapon with the arms turned on.
+        return _skeleton.Home(_authored) is { } home ? Skeleton.Moved(joined, home) : joined;
     }
 
     /// What a model can be made to do, if anything.

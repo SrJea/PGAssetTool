@@ -1634,16 +1634,12 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                 // scattered model fills says nothing about which way it lies. See
                 // Skeleton.Assembled.
                 //
-                // In the space the thing on screen is actually in: a basis says which way the model
-                // lies, and read off a model in one space it is wrong for a model in another. With
-                // the arms on, everything moves into the prefab's space, so this moves with it.
+                // Of the model in its own space, whatever is shown beside it. The parts are joined in
+                // the prefab's space and taken back into this one before anything sees them, because
+                // a weapon's facing is read against landmarks that answer here. See PreviewViewModel.
                 var standing = loaded is UnityMesh model
                     ? await Task.Run(() => Facing.Standing(
-                        _bundles!, node.Bundle,
-                        skeleton is null ? model
-                            : with.Count > 0 ? skeleton.Placed(model, null, 0f)
-                            : skeleton.Assembled(model),
-                        node.PathId))
+                        _bundles!, node.Bundle, skeleton?.Assembled(model) ?? model, node.PathId))
                     : (MeshRenderer.Basis?)null;
 
                 switch (loaded)
