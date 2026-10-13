@@ -789,10 +789,20 @@ internal static class SelfTest
                 model.Preview.TextureChoices.Skip(1).Take(3).Select(t => t.Name)));
 
             // The first entry is "(automatic)"; the ones this mesh's own renderers name follow it.
-            var head = model.Preview.TextureChoices.Skip(1).Take(dressed).ToList();
-            if (head.Any(c => !inside.Any(n => n.Label == c.Name && n.PathId == c.PathId)))
+            //
+            // Counted off the list rather than off `MeshTextures`, which is what the renderer is
+            // given and now covers the whole item — the other meshes of the prefab and their
+            // pictures come after this mesh's. What is asked here is about the order of the offer:
+            // this mesh's own paint leads it and nothing else is in among them.
+            var afterAutomatic = model.Preview.TextureChoices.Skip(1).ToList();
+            var head = afterAutomatic
+                .TakeWhile(c => inside.Any(n => n.Label == c.Name && n.PathId == c.PathId))
+                .ToList();
+            Console.WriteLine($"skins    '{skinMesh.Label}' leads with {head.Count} of its own: "
+                + string.Join(", ", head.Select(c => c.Name)));
+            if (head.Count == 0)
                 return Fail("the textures at the top of the list are not the ones on the mesh: "
-                    + string.Join(", ", head.Select(c => c.Name)));
+                    + string.Join(", ", afterAutomatic.Take(3).Select(c => c.Name)));
 
             // And nothing else is promoted here. A repainting skin's paint is cut for the weapon's
             // own geometry, so on a mesh that arrived with a skin of its own it is no better an
@@ -973,6 +983,8 @@ internal static class SelfTest
             if (OneMeshCanWearTwoPictures(model, model.WorkspaceRoot) is { } twoPaints) return Fail(twoPaints);
             if (AnItemIsTheObjectTheGameLoads(model) is { } loadedProblem) return Fail(loadedProblem);
             if (AnOutlineIsLeftOutWhicheverShapeItTakes(model) is { } shellProblem) return Fail(shellProblem);
+            if (AWeaponIsShownInTheArmsThatHoldIt(model) is { } armsProblem) return Fail(armsProblem);
+            if (AnItemIsPreviewedWhole(model) is { } wholeProblem) return Fail(wholeProblem);
             if (AnotherKindGoesTheWholeWay(model, model.WorkspaceRoot) is { } otherKind) return Fail(otherKind);
 
             var texture = model.Editor.Files.FirstOrDefault(f => f.Name.EndsWith(".png"));
@@ -2751,6 +2763,136 @@ internal static class SelfTest
     /// face — parts that must go on being drawn. `gorgon_head` is the closest of those by lean
     /// (-0.206 against Turbo Cat's -0.204) and has to stay unshelled; it is told apart by filling
     /// a twentieth of the model where a shell fills all of it.
+    /// A weapon shown in the arms that hold it, which is how the game shows it.
+    ///
+    /// Three things have to be true at once and each has been wrong on the way here: the pair has to
+    /// be more than the gun (the arms are a mesh of their own in the prefab), the view has to go on
+    /// being framed by the gun (framing by the pair shrinks every weapon to make room for a
+    /// forearm), and the textures have to keep up with the submeshes (the renderer takes one per
+    /// submesh in order, so a short list paints the arms with nothing and a misaligned one paints
+    /// them with the gun's).
+    /// An item is previewed whole, whichever of its meshes the row stands for.
+    ///
+    /// Avatars are the case this is about: a head, a body and legs are three meshes of one prefab,
+    /// 120 of 120 of them, and showing a row at a time showed a fragment — `avatar_ programmer` was
+    /// two slabs. The assertion is the one that encodes the fix without having to know how many
+    /// parts anything has: **two different mesh rows of one avatar must show the same model**, since
+    /// each of them is a part of the same whole. Before this they showed their own mesh and differed.
+    ///
+    /// With the arms off, because they are the other question and this one is not about them.
+    private static string? AnItemIsPreviewedWhole(MainViewModel model)
+    {
+        var was = model.ShowArms;
+        var kind = model.Kind;
+
+        try
+        {
+            model.ShowArms = false;
+            if (!Select(model, Core.Catalog.ItemKinds.Avatar, "avatar_ programmer"))
+                return "'avatar_ programmer' could not be selected";
+            if (model.Detail is not { } detail) return "selecting the avatar left no tree";
+
+            var meshes = Rows(detail.Roots).Where(n => n.Class == AssetClassID.Mesh).Take(2).ToList();
+            if (meshes.Count < 2)
+                return $"'avatar_ programmer' shows {meshes.Count} mesh row(s); this needs two to compare";
+
+            var shown = new List<Core.Export.Meshes.UnityMesh>();
+            foreach (var row in meshes)
+            {
+                detail.SelectedNode = row;
+                if (!Arrived(model, row)) return $"'{row.Label}' never reached the preview";
+                if (model.Preview.Rest is not { } whole) return $"'{row.Label}' showed no model";
+                shown.Add(whole);
+                Console.WriteLine($"whole    '{row.Label}' shows {whole.VertexCount} vertices "
+                    + $"in {whole.SubMeshes.Count} submeshes");
+            }
+
+            if (shown[0].VertexCount != shown[1].VertexCount)
+                return $"'{meshes[0].Label}' shows {shown[0].VertexCount} vertices and "
+                    + $"'{meshes[1].Label}' {shown[1].VertexCount}: an avatar's meshes are parts of one "
+                    + "model and each row is showing its own part rather than the whole";
+
+            return null;
+        }
+        finally
+        {
+            model.ShowArms = was;
+
+            // And back to the kind this started on. Everything after this check asks the browser for
+            // a weapon, and a browser left showing avatars has none to give — which is a
+            // "Sequence contains no matching element" a long way from here.
+            if (model.Kind != kind)
+            {
+                model.Kind = kind;
+                WaitWhile(() => model.Weapons.Count == 0, 60_000);
+            }
+        }
+    }
+
+    /// Every row of a tree, parents before children.
+    private static IEnumerable<TreeNode> Rows(IEnumerable<TreeNode> nodes)
+        => nodes.SelectMany(n => new[] { n }.Concat(Rows(n.Children)));
+
+    private static string? AWeaponIsShownInTheArmsThatHoldIt(MainViewModel model)
+    {
+        var was = model.ShowArms;
+
+        try
+        {
+            model.ShowArms = false;
+            if (!Select(model, Core.Catalog.ItemKinds.Weapon, "FirstShotgun"))
+                return "'FirstShotgun' could not be selected";
+            if (model.Detail is not { SelectedNode: { Class: AssetClassID.Mesh } opened })
+                return "selecting 'FirstShotgun' left no model on the row";
+            if (!Arrived(model, opened)) return "'FirstShotgun' never reached the preview";
+
+            var alone = model.Preview.Rest;
+            if (alone is null) return "the weapon on its own never reached the preview";
+            var slotsAlone = model.Preview.MeshTextures?.Count ?? 0;
+
+            // Waiting on the model being replaced rather than on "something is loaded": the row is
+            // already showing, so anything weaker is answered instantly by what is on screen.
+            model.ShowArms = true;
+            if (!WaitWhile(() => ReferenceEquals(model.Preview.Rest, alone), 60_000))
+                return "turning the arms on never showed anything different";
+
+            var together = model.Preview.Rest;
+            var framing = model.Preview.Framing;
+            if (together is null) return "the pair never reached the preview";
+            if (framing is null) return "nothing says what the view is framed by";
+
+            var slots = model.Preview.MeshTextures?.Count ?? 0;
+
+            Console.WriteLine($"arms     alone {alone.VertexCount} vertices in {alone.SubMeshes.Count} "
+                + $"submeshes ({slotsAlone} textures); together {together.VertexCount} in "
+                + $"{together.SubMeshes.Count} ({slots} textures); framed by {framing.VertexCount}");
+
+            if (together.VertexCount <= alone.VertexCount)
+                return "the arms are turned on and the model shown is no larger than the weapon alone";
+            if (together.SubMeshes.Count <= alone.SubMeshes.Count)
+                return "the pair is being shown as one submesh, so a texture cannot be put on each part";
+            if (slots < together.SubMeshes.Count)
+                return $"{together.SubMeshes.Count} submeshes are shown and only {slots} textures named, "
+                    + "so the parts past the end are painted with nothing";
+            if (framing.VertexCount >= together.VertexCount)
+                return "the view is framed by the pair rather than by the weapon";
+
+            // And back, because the arms are off by default and every check after this one was
+            // written against a weapon on its own.
+            model.ShowArms = false;
+            if (!WaitWhile(() => ReferenceEquals(model.Preview.Rest, together), 60_000))
+                return "turning the arms off again never showed anything different";
+
+            return model.Preview.Rest?.VertexCount == alone.VertexCount
+                ? null
+                : "turning the arms off did not put the weapon back as it was";
+        }
+        finally
+        {
+            model.ShowArms = was;
+        }
+    }
+
     private static string? AnOutlineIsLeftOutWhicheverShapeItTakes(MainViewModel model)
     {
         var was = model.Kind;

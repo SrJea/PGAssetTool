@@ -177,6 +177,16 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     /// and leave its list naming the wrong answer.
     [ObservableProperty] private bool _protectPacks = true;
 
+    /// Whether a weapon is shown in the arms that hold it. See ToolSettings.ShowArms.
+    [ObservableProperty] private bool _showArms;
+
+    /// Shown again with the answer that changed, since what is on screen was built for the old one.
+    partial void OnShowArmsChanged(bool value)
+    {
+        Remember();
+        if (Detail?.SelectedNode is { } showing) ShowPreview(showing);
+    }
+
     partial void OnProtectPacksChanged(bool value)
     {
         // The editor names this answer in its own list, so it has to hear when it changes.
@@ -311,6 +321,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         Manager.TileSize = _settings.TileSize;
         Manager.Order = (ModOrder)_settings.ModOrder;
         ProtectPacks = _settings.ProtectPacks;
+        ShowArms = _settings.ShowArms;
         FasterApplies = _settings.FasterApplies;
         LighterApplies = _settings.LighterApplies;
         ReadMemory = _settings.ReadMemory;
@@ -1009,6 +1020,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             SideBySide = Editor.SideBySide, LinkedPreviews = Editor.Linked,
             ConfirmChanges = Manager.ConfirmChanges,
             TileSize = Manager.TileSize, ModOrder = (int)Manager.Order, ProtectPacks = ProtectPacks,
+            ShowArms = ShowArms,
             FasterApplies = FasterApplies, LighterApplies = LighterApplies, ReadMemory = ReadMemory,
             MaskUnusedTextures = MaskUnusedTextures, UiScale = UiScale,
         };
@@ -1050,6 +1062,91 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     /// The row's own answer first, and only then the weapon's. A skin's model can point at the
     /// weapon's own mesh rather than carrying a copy, so the same asset is on the tree twice under
     /// two sets of materials, and the weapon's answer is right for only one of them.
+    /// The other meshes of this weapon's prefab, to be drawn with the one on this row.
+    ///
+    /// Which is the arms, in practice: `Arms_Mesh` is in 398 of 400 weapon prefabs, and the game
+    /// never shows a weapon out of them. Anything else of the prefab comes too, by the same rule —
+    /// what the prefab places, it places.
+    ///
+    /// **Only what something places.** A muzzle flash is a quad no renderer in this prefab owns a
+    /// skeleton for, and drawn unposed it sits at the origin in the middle of the picture.
+    ///
+    /// Answers the parts and what each wears, in one pass, because the second is wanted in the same
+    /// order as the first and finding them twice would be two walks of the same list.
+    /// Whether a mesh of the prefab is the player's arms rather than the item.
+    ///
+    /// Two names, because the game uses two: `Arms_Mesh`, which 398 of 400 weapon prefabs carry, and
+    /// a pair called `FPS_PLAYER_Arm_left` and `FPS_PLAYER_Arm_Right` on 22 items more. Matched
+    /// exactly and by prefix respectively, and not loosely: an avatar's own model can be called
+    /// `avatar_ programmer_arms_mesh`, and that one *is* the item.
+    private static bool AreArms(string name)
+        => string.Equals(name, Core.Weapons.WeaponResolver.Arms, StringComparison.OrdinalIgnoreCase)
+            || name.StartsWith("FPS_PLAYER_Arm", StringComparison.OrdinalIgnoreCase);
+
+    /// The rest of the prefab, to be drawn with the mesh on this row.
+    ///
+    /// **Most of what this finds is the item itself, not something it is held in**, which is what
+    /// the first version of this got wrong by treating the whole lot as the arms. Measured over 811
+    /// items: of the extra meshes something places, 1,100 are parts of the item, 149 are `Arms_Mesh`
+    /// and 50 are named `vfx=`. An avatar is a head, a body and legs — 120 of 120 — a transport is a
+    /// hull and its wheels, 90 of 90 and up to 29 pieces, and a pair of boots is two meshes. Shown
+    /// one mesh at a time, every one of those is a fragment: `avatar_ programmer` was two slabs.
+    ///
+    /// So the parts of the item always come, and only the arms are the setting's business. An effect
+    /// — the `vfx=` names, a muzzle flash or a glow — is left out either way: it is drawn by a
+    /// particle system in the game rather than standing there, and a quad hanging in the middle of
+    /// the model is not what anybody opened the row to see.
+    ///
+    /// **Only what something places.** A mesh no renderer in this prefab owns a skeleton for has
+    /// nowhere to be put, and drawn unposed it sits at the origin.
+    ///
+    /// `Frames` is what the view is sized by: the item, never the arms. Framing by the pair shrinks
+    /// every weapon to make room for a forearm reaching out of the picture.
+    private (List<(UnityMesh Mesh, Skeleton Skeleton, bool Frames)> With, List<PreviewImage?> Wearing)
+        Held(TreeNode node)
+    {
+        var with = new List<(UnityMesh, Skeleton, bool)>();
+        var wearing = new List<PreviewImage?>();
+        if (_tree?.PrefabBundle is not { } prefabBundle) return (with, wearing);
+
+        foreach (var other in _tree.PrefabAssets.Where(a => a.Class == AssetClassID.Mesh))
+        {
+            if (other.PathId == node.PathId) continue;
+            if (other.Name.StartsWith("vfx=", StringComparison.OrdinalIgnoreCase)) continue;
+
+            var arms = AreArms(other.Name);
+            if (arms && !ShowArms) continue;
+
+            var bundle = other.Bundle.Length > 0 ? other.Bundle : prefabBundle;
+            try
+            {
+                if (AssetPreview.Locate(_bundles!, bundle, AssetClassID.Mesh, other.PathId, other.Name)
+                    is not var (file, info)) continue;
+
+                var field = _bundles!.Context.Deserialize(file, info);
+                if (field is null || UnityMesh.Read(field) is not { VertexCount: > 0 } mesh) continue;
+                if (Skeleton.For(_bundles, bundle, other.PathId, whole: true) is not { } bones) continue;
+
+                with.Add((mesh, bones, !arms));
+                wearing.AddRange(TexturesFor(_tree.MeshTextures
+                        .FirstOrDefault(m => m.MeshPathId == other.PathId))
+                    ?? Enumerable.Repeat((PreviewImage?)null, Math.Max(mesh.SubMeshes.Count, 1)));
+            }
+            catch (Exception)
+            {
+                // One part that will not read is a part not drawn. The model is still the model.
+            }
+        }
+
+        return (with, wearing);
+    }
+
+    /// One texture list for the model and everything drawn with it, in the order the submeshes end
+    /// up in. A model with nothing beside it keeps the list it had, null and all.
+    private static IReadOnlyList<PreviewImage?>? Alongside(
+        IReadOnlyList<PreviewImage?>? mine, IReadOnlyList<PreviewImage?> theirs)
+        => theirs.Count == 0 ? mine : [.. mine ?? [], .. theirs];
+
     private MeshTextures? SlotsFor(TreeNode node)
         => node.Within?.Wearing ?? _tree?.MeshTextures.FirstOrDefault(m => m.MeshPathId == node.PathId);
 
@@ -1469,13 +1566,22 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                 // the bones are the renderer's and the clips are the prefab's, and a mesh with
                 // neither is shown standing still as it always was. The prefab being the one the row
                 // was reached through: a skin's own model moves by its own clips.
+                // The whole prefab when the arms are wanted, because they hang off objects no mesh
+                // is skinned to and a bone list has nowhere to put them. See Skeleton.For.
                 var (skeleton, motions) = loaded is UnityMesh
                     ? await Task.Run(() =>
                     {
-                        var bones = Skeleton.For(_bundles!, node.Bundle, node.PathId);
+                        var bones = Skeleton.For(_bundles!, node.Bundle, node.PathId, whole: true);
                         return (bones, ClipsFor(node, bones));
                     })
                     : (null, []);
+
+                // The rest of the prefab, and what those parts wear. An item is drawn whole because
+                // it is one thing — a head, a body and legs, or a hull and its wheels — and showing
+                // one mesh of it shows a fragment. Only the arms wait to be asked for. See Held.
+                var (with, alongside) = loaded is UnityMesh && skeleton is not null
+                    ? await Task.Run(() => Held(node))
+                    : ([], []);
 
                 // Which way round it opens, from the prefab rather than from the bounding box, so
                 // every weapon points the same way. Read here because it needs the bundle, which
@@ -1483,9 +1589,17 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                 // Of the model put together rather than of the model as written: the box a
                 // scattered model fills says nothing about which way it lies. See
                 // Skeleton.Assembled.
+                //
+                // In the space the thing on screen is actually in: a basis says which way the model
+                // lies, and read off a model in one space it is wrong for a model in another. With
+                // the arms on, everything moves into the prefab's space, so this moves with it.
                 var standing = loaded is UnityMesh model
                     ? await Task.Run(() => Facing.Standing(
-                        _bundles!, node.Bundle, skeleton?.Assembled(model) ?? model, node.PathId))
+                        _bundles!, node.Bundle,
+                        skeleton is null ? model
+                            : with.Count > 0 ? skeleton.Placed(model, null, 0f)
+                            : skeleton.Assembled(model),
+                        node.PathId))
                     : (MeshRenderer.Basis?)null;
 
                 switch (loaded)
@@ -1497,14 +1611,17 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                         // Reordered before it is shown, so the choice this mesh is remembered with
                         // lands in a list that already holds it.
                         OfferTextures(node);
-                        Preview.Show(mesh, $"{node.Label}   @ {node.Bundle}", TexturesFor(SlotsFor(node)),
+                        // The parts drawn with it follow this mesh's submeshes, so their textures
+                        // follow its textures: the renderer takes one per submesh, in order.
+                        Preview.Show(mesh, $"{node.Label}   @ {node.Bundle}",
+                            Alongside(TexturesFor(SlotsFor(node)), alongside),
                             // The model it was reached through is part of which model this is: two
                             // rows can stand for the same asset, and an angle turned to on one of
                             // them is not the angle the other was left at.
                             subject: node.Within is { } within
                                 ? $"{within.Path}/{node.Bundle}:{node.PathId}"
                                 : $"{node.Bundle}:{node.PathId}",
-                            skeleton: skeleton, motions: motions, standing: standing);
+                            skeleton: skeleton, motions: motions, standing: standing, with: with);
 
                         // After the model, which puts back whatever this mesh was last wearing.
                         // Taken whether or not it was found, so it cannot arrive on the next one.

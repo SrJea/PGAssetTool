@@ -88,11 +88,48 @@ public sealed partial class PreviewViewModel(AlphaPreference? alpha = null) : Ob
 
     private Skeleton? _skeleton;
 
+    /// The other meshes of the same prefab, each with the skeleton that places it — the arms a
+    /// weapon is held in, above all.
+    ///
+    /// Kept beside the model rather than joined to it once, because a clip has to move them: they
+    /// are posed one by one and joined again every frame. Joining them once and posing the result
+    /// cannot work, since blend indices count against a bone list belonging to one mesh.
+    ///
+    /// Empty is the ordinary case, and the one the rest of this file was written for.
+    private IReadOnlyList<(UnityMesh Mesh, Skeleton Skeleton, bool Frames)> _with = [];
+
+    /// What the view is framed by: the model itself, never what it is held in. Framing by the pair
+    /// would shrink every weapon to make room for a forearm reaching out of the picture.
+    [ObservableProperty] private UnityMesh? _framing;
+
+    /// The model and everything shown with it, at one moment, in the prefab's own space. Null when
+    /// there is nothing to show it with, which leaves every other path exactly as it was.
+    ///
+    /// Each part is posed by its own skeleton — its bones, its bind poses — and they are joined
+    /// afterwards. `Placed` rather than `Pose` because the two have only the prefab's space in
+    /// common; see Skeleton.Placed.
+    /// <param name="framing">
+    /// Leave out the parts that do not size the view — the arms. See MainViewModel.Held.
+    /// </param>
+    private UnityMesh? Built(Motion? motion, float time, bool framing = false)
+    {
+        if (_with.Count == 0 || _skeleton is null || _authored is null) return null;
+
+        var parts = new List<UnityMesh> { _skeleton.Placed(_authored, motion, time) };
+        foreach (var (mesh, skeleton, frames) in _with)
+            if (!framing || frames)
+                parts.Add(skeleton.Placed(mesh, motion, time));
+
+        return UnityMesh.Combined(_authored.Name, parts);
+    }
+
     /// What a model can be made to do, if anything.
-    private void Dress(Skeleton? skeleton, IReadOnlyList<Motion>? motions)
+    private void Dress(Skeleton? skeleton, IReadOnlyList<Motion>? motions,
+        IReadOnlyList<(UnityMesh Mesh, Skeleton Skeleton, bool Frames)>? with = null)
     {
         Stop();
         _skeleton = skeleton;
+        _with = with ?? [];
         _unposable = false;
         Clips.Clear();
 
@@ -187,7 +224,8 @@ public sealed partial class PreviewViewModel(AlphaPreference? alpha = null) : Ob
 
         try
         {
-            Mesh = _skeleton.Pose(_authored ?? rest, Clip.Motion, (float)Time);
+            Mesh = Built(Clip.Motion, (float)Time)
+                ?? _skeleton.Pose(_authored ?? rest, Clip.Motion, (float)Time);
         }
         catch (Exception e) when (e is IndexOutOfRangeException or ArgumentOutOfRangeException
                                       or KeyNotFoundException or InvalidOperationException)
@@ -330,9 +368,10 @@ public sealed partial class PreviewViewModel(AlphaPreference? alpha = null) : Ob
     /// </param>
     public void Show(UnityMesh mesh, string caption, IReadOnlyList<PreviewImage?>? textures,
         string? subject = null, Skeleton? skeleton = null, IReadOnlyList<Motion>? motions = null,
-        MeshRenderer.Basis? standing = null)
+        MeshRenderer.Basis? standing = null,
+        IReadOnlyList<(UnityMesh Mesh, Skeleton Skeleton, bool Frames)>? with = null)
     {
-        Dress(skeleton, motions);
+        Dress(skeleton, motions, with);
         _subject = subject;
         var seen = subject is not null && _views.TryGetValue(subject, out var before) ? before : null;
 
@@ -344,7 +383,15 @@ public sealed partial class PreviewViewModel(AlphaPreference? alpha = null) : Ob
         // Shown put together the way its bones put it together, and kept as it was written for the
         // posing: a clip carries the bones' own transforms already. See Skeleton.Assembled.
         _authored = mesh;
-        Rest = skeleton?.Assembled(mesh) ?? mesh;
+
+        // With something to be held in, the whole of it moves into the prefab's own space, that
+        // being the only space the two share. Framed by the model alone either way.
+        Framing = skeleton?.Assembled(mesh) ?? mesh;
+        if (Built(null, 0f) is { } together && skeleton is not null)
+            (Rest, Framing) = (together,
+                Built(null, 0f, framing: true) ?? skeleton.Placed(mesh, null, 0f));
+        else
+            Rest = Framing;
         Mesh = Rest;
         Standing = standing;
         MeshTextures = textures;

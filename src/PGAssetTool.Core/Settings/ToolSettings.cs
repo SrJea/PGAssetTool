@@ -92,6 +92,18 @@ public sealed record ToolSettings
     /// editor — and looking inside your own workspace needs no pack at all.
     public bool ProtectPacks { get; init; } = true;
 
+    /// Whether a weapon is shown in the arms that hold it.
+    ///
+    /// Off. An item is always drawn whole — a head, a body and legs; a hull and its wheels — because
+    /// that is one thing rather than a choice. The arms are not the item: they are the player's, the
+    /// game puts the same pair on nearly every weapon, and somebody opening a weapon to work on it
+    /// wants the weapon rather than a forearm across the grip. So they wait to be asked for, and
+    /// asking for them is what this is.
+    ///
+    /// It changes the preview and nothing else: what is extracted, packed and installed is the same
+    /// either way.
+    public bool ShowArms { get; init; }
+
     /// Whether writing to the game is done for speed rather than for size.
     ///
     /// The squeezing itself is about four times quicker and the bundles come out about a sixth

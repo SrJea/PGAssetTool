@@ -74,6 +74,103 @@ public sealed record UnityMesh
 
     public float[]? Get(VertexAttribute attribute) => Attributes.GetValueOrDefault(attribute);
 
+    /// Several meshes of one prefab as one mesh, for showing them together.
+    ///
+    /// A weapon in this game is not only the weapon: `Arms_Mesh` is in 398 of 400 prefabs, and the
+    /// clips move it — 1,437 of 1,523 weapons animate an arm that actually moves. The renderer draws
+    /// one mesh into one depth buffer, so showing the pair means one mesh.
+    ///
+    /// **The parts must already be posed** (`Skeleton.Assembled`, from a skeleton read with the
+    /// whole prefab, so that both are in the prefab's own space). What comes back is therefore for
+    /// looking at and not for writing back: the skinning is dropped rather than carried, because
+    /// blend indices count against a bone list that is per mesh and means nothing once two are
+    /// joined. Nothing exports this.
+    ///
+    /// Each part keeps its own submeshes, in order, so a texture per submesh still lands where it
+    /// belongs. `BaseVertex` is folded into the indices here — the renderer does not add it, the glb
+    /// writer does — so the result needs it from nobody.
+    ///
+    /// Answers null if any part carries an outline shell. Whether to cull by facing is decided for a
+    /// whole mesh (`MeshRenderer`), and two parts can disagree; of the game's 2,624 models 13 are
+    /// shelled and no weapon is among them, so this is the case that does not arise rather than one
+    /// worth guessing at. The caller shows the one mesh it would have shown.
+    public static UnityMesh? Combined(string name, IReadOnlyList<UnityMesh> parts)
+    {
+        if (parts.Count == 0) return null;
+        if (parts.Count == 1) return parts[0];
+        if (parts.Any(p => p.CarriesAnOutline)) return null;
+
+        var dimensions = new Dictionary<VertexAttribute, int>();
+        foreach (var part in parts)
+            foreach (var (attribute, width) in part.Dimensions)
+                dimensions.TryAdd(attribute, width);
+
+        // Position is what everything downstream indexes three at a time; a part without one has
+        // no geometry to contribute and would only shift every index after it.
+        if (!dimensions.ContainsKey(VertexAttribute.Position)) return null;
+
+        var total = parts.Sum(p => p.VertexCount);
+        var attributes = dimensions.ToDictionary(d => d.Key, d => new float[total * d.Value]);
+        var indices = new List<int>();
+        var subMeshes = new List<SubMesh>();
+        var vertexBase = 0;
+
+        foreach (var part in parts)
+        {
+            foreach (var (attribute, width) in dimensions)
+            {
+                var into = attributes[attribute];
+                var from = part.Get(attribute);
+                if (from is null) continue;
+
+                // A part may carry fewer components than another — the last UV set is four wide on
+                // 378 of the game's meshes and two on the rest. Copy what there is and leave the
+                // rest at zero, rather than reading off the end of the shorter one.
+                var mine = part.Dimensions.GetValueOrDefault(attribute, width);
+                var copy = Math.Min(mine, width);
+
+                for (var vertex = 0; vertex < part.VertexCount; vertex++)
+                for (var component = 0; component < copy; component++)
+                {
+                    var source = vertex * mine + component;
+                    if (source < from.Length)
+                        into[(vertexBase + vertex) * width + component] = from[source];
+                }
+            }
+
+            var own = part.SubMeshes.Count > 0
+                ? part.SubMeshes
+                : [new SubMesh(0, part.Indices.Length, 0, 0)];
+
+            foreach (var sub in own)
+            {
+                var start = indices.Count;
+                for (var i = 0; i < sub.IndexCount; i++)
+                {
+                    var at = sub.IndexStart + i;
+                    if (at >= 0 && at < part.Indices.Length)
+                        indices.Add(part.Indices[at] + sub.BaseVertex + vertexBase);
+                }
+
+                subMeshes.Add(new SubMesh(start, indices.Count - start, sub.Topology, BaseVertex: 0));
+            }
+
+            vertexBase += part.VertexCount;
+        }
+
+        return new UnityMesh
+        {
+            Name = name,
+            VertexCount = total,
+            Attributes = attributes,
+            Dimensions = dimensions,
+            Indices = [.. indices],
+            SubMeshes = subMeshes,
+            BindPoses = [],
+            BoneNameHashes = [],
+        };
+    }
+
     /// Whether this mesh carries an outline shell: a copy of itself, a little larger and turned
     /// inside out, which the game draws as a silhouette by showing only the side facing away from
     /// you. Nothing in the object says so, so it is measured, and two things have to hold.

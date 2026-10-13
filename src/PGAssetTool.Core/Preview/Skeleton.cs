@@ -60,7 +60,12 @@ public sealed class Skeleton
     /// answering by mesh alone gives, and that is an accident of file order. Naming the root is how
     /// a caller says which arrangement it means.
     /// </param>
-    public static Skeleton? For(BundleSet bundles, string bundle, long meshPathId, string? under = null)
+    /// <param name="whole">
+    /// Read every object in the prefab rather than only the ones this mesh is skinned to. What that
+    /// is for is on `Build`.
+    /// </param>
+    public static Skeleton? For(
+        BundleSet bundles, string bundle, long meshPathId, string? under = null, bool whole = false)
     {
         AssetsFileInstance file;
         try { file = bundles.Open(bundle); }
@@ -87,10 +92,10 @@ public sealed class Skeleton
             var owner = renderer["m_GameObject"];
             var mine = owner.IsDummy ? 0 : TransformOf(bundles, file, owner["m_PathID"].AsLong);
 
-            return Build(bundles, file, bones, mine);
+            return Build(bundles, file, bones, mine, whole: whole);
         }
 
-        return Unskinned(bundles, file, meshPathId);
+        return Unskinned(bundles, file, meshPathId, whole);
     }
 
     /// A mesh nothing skins, moved by moving the object it hangs off.
@@ -98,7 +103,8 @@ public sealed class Skeleton
     /// A MeshFilter names the mesh, and a clip moves the MeshFilter's own transform by name, so that
     /// transform is the one bone and every vertex rides on it. #8's Old Combat Knife skin is built
     /// this way: its blade is a plain mesh that five clips of its own swing about.
-    private static Skeleton? Unskinned(BundleSet bundles, AssetsFileInstance file, long meshPathId)
+    private static Skeleton? Unskinned(
+        BundleSet bundles, AssetsFileInstance file, long meshPathId, bool whole = false)
     {
         foreach (var info in file.file.AssetInfos)
         {
@@ -111,7 +117,7 @@ public sealed class Skeleton
             var transform = owner.IsDummy ? 0 : TransformOf(bundles, file, owner["m_PathID"].AsLong);
             if (transform == 0) return null;
 
-            return Build(bundles, file, [transform], transform, rigid: true);
+            return Build(bundles, file, [transform], transform, rigid: true, whole: whole);
         }
 
         return null;
@@ -166,8 +172,21 @@ public sealed class Skeleton
 
     /// Walks up from each bone to the top, so every transform between them is present and a parent
     /// always comes before its children.
+    ///
+    /// <param name="whole">
+    /// Also walk down from the top, so that every object in the prefab is a joint and not only the
+    /// ones a mesh is skinned to.
+    ///
+    /// A bone list answers what moves the vertices, which is all posing one mesh needs. It is not
+    /// what a clip drives: measured over 400 weapons, the clips of 90 of them drive objects no mesh
+    /// is skinned to — `Point_Arm_Left` and `Point_Arm_Right` most often, then `Bone_Shutter`,
+    /// `Bone_Bullet`, `Bone_Clips` — which a skeleton built from bones alone has nowhere to put. The
+    /// extra joints carry no vertices and change no pose; they give the rest of the clip somewhere
+    /// to land, and they are what lets two meshes of one prefab be posed in the same space.
+    /// </param>
     private static Skeleton? Build(
-        BundleSet bundles, AssetsFileInstance file, IReadOnlyList<long> bones, long renderer, bool rigid = false)
+        BundleSet bundles, AssetsFileInstance file, IReadOnlyList<long> bones, long renderer,
+        bool rigid = false, bool whole = false)
     {
         var joints = new List<Joint>();
         var at = new Dictionary<long, int>();
@@ -200,8 +219,43 @@ public sealed class Skeleton
 
         var order = bones.Select(Add).ToList();
         var root = renderer == 0 ? -1 : Add(renderer);
+        if (order.Any(i => i < 0)) return null;
 
-        return order.Any(i => i < 0) ? null : new Skeleton(joints, order, root, rigid);
+        // Down from whatever the walk up reached, if the caller wants the whole prefab. Taken from
+        // the tops rather than from the renderer, because the renderer sits part way down and the
+        // objects a clip drives are spread across the whole of it.
+        if (whole)
+        {
+            var tops = at.Where(pair => joints[pair.Value].Parent < 0).Select(pair => pair.Key).ToList();
+            foreach (var top in tops) Descend(top, 0);
+        }
+
+        void Descend(long transform, int depth)
+        {
+            // A hierarchy that points at itself would otherwise be walked for ever. The deepest
+            // rig measured in this game is 78 objects, so this is far above anything real.
+            if (depth > 64) return;
+
+            var info = file.file.GetAssetInfo(transform);
+            var field = info is null ? null : bundles.Context.Deserialize(file, info);
+            if (field is null) return;
+
+            var children = field["m_Children"];
+            if (children.IsDummy) return;
+
+            foreach (var child in children["Array"].Children)
+            {
+                var id = child["m_PathID"].AsLong;
+                if (id == 0) continue;
+
+                // Already a joint from the walk up, or added now. Either way it is descended into:
+                // the objects a clip drives hang below bones as often as beside them.
+                if (!at.ContainsKey(id) && Add(id) < 0) continue;
+                Descend(id, depth + 1);
+            }
+        }
+
+        return new Skeleton(joints, order, root, rigid);
     }
 
     private static float[] Trs(AssetTypeValueField transform)
@@ -290,21 +344,32 @@ public sealed class Skeleton
     /// carries the bones' own transforms, and starting here would apply them twice.
     public UnityMesh Assembled(UnityMesh mesh) => Pose(mesh, null, 0f);
 
+    /// The same, but left where the prefab hangs it rather than where it was read.
+    ///
+    /// Posing normally takes a mesh back into its own space, so that a model at rest is the model as
+    /// it was written (see `home` in Pose). That is right for one mesh and wrong for two: a weapon
+    /// and the arms that hold it are different meshes of one prefab, each written in its own space,
+    /// and normalising each to its own puts them in two different places. Asking for the prefab's
+    /// space instead is what lets them be shown together. One mesh on its own has no use for it.
+    public UnityMesh Placed(UnityMesh mesh, Motion? motion, float time)
+        => Pose(mesh, motion, time, common: true);
+
     /// The mesh with its vertices moved to where this clip puts them at this moment.
     ///
     /// Ordinary linear blend skinning: every vertex is carried by up to four bones, each with a
     /// weight, and ends up at the weighted sum of where each of them would put it. The bind pose is
     /// what takes a vertex out of the model's own space and into the bone's, which is why it is
     /// stored with the mesh rather than with the skeleton.
-    public UnityMesh Pose(UnityMesh mesh, Motion? motion, float time)
+    public UnityMesh Pose(UnityMesh mesh, Motion? motion, float time, bool common = false)
     {
         if (mesh.Get(VertexAttribute.Position) is not { } positions) return mesh;
 
         // One object, one matrix: where it is now, taken back out of where it sits at rest, so the
         // model at rest is the model as it was read.
         if (Rigid)
-            return Carried(mesh, positions,
-                Matrix.Times(Matrix.Inverse(Rest[Bones[0]]), World(motion, time)[Bones[0]]));
+            return Carried(mesh, positions, common
+                ? World(motion, time)[Bones[0]]
+                : Matrix.Times(Matrix.Inverse(Rest[Bones[0]]), World(motion, time)[Bones[0]]));
 
         if (mesh.Get(VertexAttribute.BlendIndices) is not { } joints) return mesh;
         if (mesh.BindPoses.Count == 0) return mesh;
@@ -325,8 +390,9 @@ public sealed class Skeleton
         // origin, where its prefab hangs them a metre and a half up and to the right. So the space
         // is taken from the model itself — at rest, every bone's skinning matrix is the same one,
         // and its inverse is by construction the transform that leaves the mesh where it was read.
-        var home = Matrix.Inverse(Matrix.Times(
-            Rest[Bones[0]], Matrix.FromRows(mesh.BindPoses[0])));
+        var home = common
+            ? Matrix.Identity
+            : Matrix.Inverse(Matrix.Times(Rest[Bones[0]], Matrix.FromRows(mesh.BindPoses[0])));
 
         // One matrix per bone: where the bone is now, applied after taking the vertex into its space.
         var skinning = new float[Bones.Count][];
