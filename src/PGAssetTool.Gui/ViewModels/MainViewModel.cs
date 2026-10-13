@@ -1104,6 +1104,24 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     /// `avatar_agent_harn`'s eye, a rover's glass — so the renderer answers this and the size of a
     /// part says nothing about it.
 
+    /// Whether a part of the prefab is the item's drawn-on shadow rather than the item.
+    ///
+    /// 41 of the game's 90 transports carry one — a flat slab under the wheels, named after the
+    /// vehicle with `_shadow` or `_shadows` on the end — and the game draws it through a material
+    /// that makes it a shadow on the ground. The preview has no such material, so it came out as the
+    /// grey box a car was sitting on.
+    ///
+    /// By the end of the name and not by the word appearing in it: eight items are *called* shadow —
+    /// `sword_of_shadows`, `glider_dense_shadows`, `avatar_the_shadow` — and their own meshes say so
+    /// all the way through. Those are models on the row rather than parts beside one, so this is
+    /// never asked of them, and the suffix would spare them anyway. 43 parts are caught.
+    private static bool IsShadow(string name)
+    {
+        var stem = name.EndsWith("_mesh", StringComparison.OrdinalIgnoreCase) ? name[..^5] : name;
+        return stem.EndsWith("shadow", StringComparison.OrdinalIgnoreCase)
+            || stem.EndsWith("shadows", StringComparison.OrdinalIgnoreCase);
+    }
+
     /// The object this item's own prefab hangs from, which every part has to be read under.
     ///
     /// **Several prefabs draw the same meshes and they disagree.** A weapon's own prefab holds one
@@ -1149,6 +1167,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         {
             if (other.PathId == node.PathId) continue;
             if (other.Name.StartsWith("vfx=", StringComparison.OrdinalIgnoreCase)) continue;
+            if (IsShadow(other.Name)) continue;
 
             var arms = AreArms(other.Name);
             if (arms && !ShowArms) continue;
