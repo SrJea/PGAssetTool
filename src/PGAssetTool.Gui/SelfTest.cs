@@ -389,7 +389,10 @@ internal static class SelfTest
                         model.Preview.ChosenTexture = wanted;
                         WaitWhile(() => model.Preview.MeshTextures == slots, 30_000);
 
-                        var worn = model.Preview.MeshTextures;
+                        // The model's own submeshes. What is shown beside it keeps its own
+                        // pictures: a weapon's skin is cut for the weapon, and painted over
+                        // the arms as well it is a smear of the gun's paint on the hands.
+                        var worn = model.Preview.MeshTextures?.Take(model.Preview.Own).ToList();
                         Console.WriteLine($"         wearing '{wanted.Name}': "
                             + $"{(worn is null ? "nothing" : string.Join(", ", worn.Select(s => s is null ? "-" : $"{s.Width}x{s.Height}")))}");
 

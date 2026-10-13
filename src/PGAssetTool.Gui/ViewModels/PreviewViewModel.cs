@@ -102,6 +102,13 @@ public sealed partial class PreviewViewModel(AlphaPreference? alpha = null) : Ob
     /// would shrink every weapon to make room for a forearm reaching out of the picture.
     [ObservableProperty] private UnityMesh? _framing;
 
+    /// How many of the submeshes on screen belong to the model on the row rather than to the parts
+    /// shown beside it. The model's come first in the join, so these are the first this many.
+    ///
+    /// What it answers: a texture chosen by hand covers the model and not the arms, and anything
+    /// asking what this mesh is wearing means these.
+    [ObservableProperty] private int _own = 1;
+
     /// Whether anything shown carries an outline shell, which the join itself no longer says.
     /// Null when there is nothing beside the model and the mesh can answer for itself.
     [ObservableProperty] private bool? _shelled;
@@ -398,6 +405,7 @@ public sealed partial class PreviewViewModel(AlphaPreference? alpha = null) : Ob
 
         // With something to be held in, the whole of it moves into the prefab's own space, that
         // being the only space the two share. Framed by the model alone either way.
+        Own = Math.Max(mesh.SubMeshes.Count, 1);
         Shelled = _with.Count == 0 ? null
             : mesh.CarriesAnOutline || _with.Any(w => w.Mesh.CarriesAnOutline);
         Framing = skeleton?.Assembled(mesh) ?? mesh;
@@ -454,12 +462,24 @@ public sealed partial class PreviewViewModel(AlphaPreference? alpha = null) : Ob
         Remember();
     }
 
-    /// Covers the whole model with one texture, which is the point: the question it answers is what
-    /// this mesh looks like wearing a different skin, and a skin is not per-submesh.
+    /// Covers the model with one texture, which is the point: the question it answers is what this
+    /// mesh looks like wearing a different skin, and a skin is not per-submesh.
+    ///
+    /// **The model, and not what is shown beside it.** The parts of an item keep their own pictures:
+    /// a weapon's skin is cut for the weapon, and painted over the arms as well it came out as a
+    /// smear of the gun's paint where the hands should be. The model's submeshes come first in the
+    /// join, so they are the ones at the front of this list.
     public void Wear(PreviewImage picture)
-        => MeshTextures = Enumerable
-            .Repeat<PreviewImage?>(picture, Math.Max(Mesh?.SubMeshes.Count ?? 1, 1))
+    {
+        var mine = Math.Max(Own, 1);
+        var all = Math.Max(Mesh?.SubMeshes.Count ?? mine, mine);
+
+        MeshTextures = Enumerable.Range(0, all)
+            .Select(at => at < mine
+                ? picture
+                : _automatic is { } worn && at < worn.Count ? worn[at] : null)
             .ToList();
+    }
 
     private IReadOnlyList<PreviewImage?>? _automatic;
 
