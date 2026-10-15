@@ -11,14 +11,10 @@ public static class PackBuilder
 
     /// What the built file is called: the mod's name, and nothing else.
     ///
-    /// It used to be the workspace directory's name, which made three names for one thing — the
-    /// folder, the manifest's name, and the id — each authoritative somewhere different. The
-    /// manager showed one, the file on disk carried another, and renaming a working directory
-    /// quietly renamed what an author was about to hand out.
-    ///
     /// The folder is where somebody works. The name is what the mod is called, wherever it is
     /// written down. The id is what the ledger matches an update by, and is nobody's business but
-    /// the tool's.
+    /// the tool's. Named after the folder instead, there are three names for one thing and renaming
+    /// a working directory renames what an author is about to hand out.
     public static string FileNameFor(PackManifest manifest)
     {
         var name = Sanitise(manifest.Name);
@@ -85,9 +81,9 @@ public static class PackBuilder
 
     /// A file a workspace names, resolved and checked to be inside it.
     ///
-    /// Every path in a manifest is relative to the workspace by definition, and until this was here
-    /// nothing said so: an absolute path, a drive-relative one, or enough of `..` reached anywhere
-    /// the person building could read, and whatever it found went into the pack under the name the
+    /// Every path in a manifest is relative to the workspace by definition, and this is what says
+    /// so: unchecked, an absolute path, a drive-relative one or enough of `..` reaches anywhere the
+    /// person building can read, and whatever it finds goes into the pack under the name the
     /// manifest gave it. A manifest is data — most of them written by this tool, but a workspace is
     /// a folder, and folders are shared. The file worth naming is `author.key`, which sits at a
     /// known place beside the executable and is the one thing that would let somebody sign as you.
@@ -152,8 +148,8 @@ public static class PackBuilder
     private static string Sanitise(string name) => Settings.SafeName.For(name, "");
 
     /// <param name="signer">
-    /// Signs and scrambles the pack when given. Null leaves it a plain zip, which is what every
-    /// pack was before this and what a pack built with protection off still is.
+    /// Signs and scrambles the pack when given. Null leaves it a plain zip, which is what a pack
+    /// built with protection off is.
     /// </param>
     public static PackResult Build(string workspace, string outputPath, PackAuthor? signer = null)
     {

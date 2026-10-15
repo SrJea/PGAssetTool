@@ -23,9 +23,8 @@ public sealed record SkinModel(string AssetPath, string Bundle)
     /// Everything the model reaches, from the bundle it lives in.
     ///
     /// The object is found by the leaf of the path that named it, which is the same rule the
-    /// resolver uses everywhere else. Written out twice before this — once to list a skin's
-    /// materials and once to work out which bundles a pack of it can have moved into — and the two
-    /// copies had come to disagree about what to do when the bundle is not there.
+    /// resolver uses everywhere else. One implementation of it, because two callers ask: the list
+    /// of a skin's materials, and which bundles a pack of it can have moved into.
     ///
     /// Answers nothing rather than throwing: a model that cannot be read is a model that brings no
     /// materials, and neither caller has anything better to do with the news.
@@ -157,8 +156,8 @@ public sealed class WeaponResolver(BundleSet bundles, GameCatalogs catalogs)
                 unresolved.Add($"'{named}' was not found inside bundle '{prefabBundle}'");
             else
                 // Filtered after the walk and never during it: what a withheld object points at is
-                // found exactly as before — a texture a component names is still a texture — and it
-                // is the object itself that does not appear. See Replaceable for which and why.
+                // found exactly as anything else is — a texture a component names is still a
+                // texture — and it is the object itself that does not appear. See Replaceable.
                 assets = ReferenceWalker
                     .Closure(bundles.Context, file, root.Value, Graph.Resolve, skip: Opaque)
                     .Where(a => Pack.Replaceable.CanShow(a.Class))
@@ -204,17 +203,15 @@ public sealed class WeaponResolver(BundleSet bundles, GameCatalogs catalogs)
     ///
     /// The bundle's own container table first, because a name is not unique inside a bundle: a
     /// pet's bundle holds `Pets/Content/pet_alien_cat`, the model, and `Pets/Infos/pet_alien_cat`,
-    /// a description of it, and both GameObjects are called `pet_alien_cat`. Asked by name, the
-    /// walk started from whichever came first in the file — the description, for 50 of the 112
-    /// pets — and the pet came out as a GameObject and a Transform with no model at all.
+    /// a description of it, and both GameObjects are called `pet_alien_cat`. Asked by name, the walk
+    /// starts from whichever comes first in the file — the description, for 50 of the 112 pets — and
+    /// the pet comes out as a GameObject and a Transform with no model at all, as do three weapons.
     ///
-    /// Measured over all 2,624 items before this was changed: the two answers agree for 2,466, the
-    /// table names a GameObject for every single one, and of the 158 that differ, 69 gain a model,
-    /// 88 reach the same meshes by another copy of the same object, and one —
-    /// `royale_car_monster_truck` — reaches seven meshes where the name found ten. That one goes to
-    /// the table as well: it is what the game loads for that path, and the name is a guess that
-    /// happened to land on a fuller object. Three weapons were quietly short of a mesh with the 50
-    /// pets.
+    /// Measured over all 2,624 items: the two answers agree for 2,466, the table names a GameObject
+    /// for every single one, and of the 158 that differ, 69 gain a model, 88 reach the same meshes
+    /// by another copy of the same object, and one — `royale_car_monster_truck` — reaches seven
+    /// meshes where the name finds ten. That one goes to the table as well: it is what the game
+    /// loads for that path, and the name is a guess that happens to land on a fuller object.
     ///
     /// By the leaf of the path, without minding case, only when the table names nothing. The
     /// registry's id and the prefab's own name are the same string for a weapon and only nearly
@@ -303,6 +300,9 @@ public sealed class WeaponResolver(BundleSet bundles, GameCatalogs catalogs)
         return after == leaf.Length || leaf[after] is '_' or '-' or '.';
     }
 
+    /// The first-person arms, which every weapon's prefab carries under this name.
+    public const string Arms = "Arms_Mesh";
+
     /// Which of a model's meshes is the thing it is a model of.
     ///
     /// Every weapon's prefab holds the player's arms as well as the gun. They are the same class in
@@ -321,11 +321,7 @@ public sealed class WeaponResolver(BundleSet bundles, GameCatalogs catalogs)
     /// neither in one weapon's bundle nor named for one. The mesh's own name is kept as a second
     /// voice, worth something when it agrees and outweighed when it does not, and having anything
     /// to wear breaks a tie between two meshes neither of which is dressed from here.
-    ///
     /// <param name="named">Names the thing might be called after, best first.</param>
-    /// The first-person arms, which every weapon's prefab carries under this name.
-    public const string Arms = "Arms_Mesh";
-
     public static AssetNode? MainMesh(
         string bundle, IReadOnlyList<AssetNode> assets, IReadOnlyList<MeshTextures> dressing,
         params string[] named)
@@ -339,12 +335,12 @@ public sealed class WeaponResolver(BundleSet bundles, GameCatalogs catalogs)
         // mesh called exactly this. A weapon whose only mesh is the arms — #121 Dater_Arms, which
         // is a pair of fists — is answered above, where one mesh is the answer.
         //
-        // **It used to be a tie-break and that was not enough.** The score gives four points for
-        // wearing a texture out of the weapon's own bundle, and the arms of sixteen weapons do:
-        // their generic mesh outscored the weapon's own and #7 AK47, #300 Stormtrooper Exoskeleton
-        // and fourteen others came up as a pair of hands. Measured over all 1,523: making the arms
-        // lose outright moves exactly those sixteen, each onto the mesh named after the weapon —
-        // AK47_Mesh1, exoskeleton_1_Mesh, Crossbow_Mesh — and moves nothing else.
+        // Outright, and not as a tie-break: the score gives four points for wearing a texture out
+        // of the weapon's own bundle, and the arms of sixteen weapons do — #7 AK47, #300
+        // Stormtrooper Exoskeleton and fourteen others, where the generic mesh outscores the
+        // weapon's own and the weapon comes up as a pair of hands. Measured over all 1,523, those
+        // sixteen are the only ones this moves, each onto the mesh named after the weapon:
+        // AK47_Mesh1, exoskeleton_1_Mesh, Crossbow_Mesh.
         //
         // Stable below that, so meshes that score the same keep the order the walk found them in.
         // The scoring still settles the hard ones, where a weapon is called one thing and its art
@@ -370,12 +366,6 @@ public sealed class WeaponResolver(BundleSet bundles, GameCatalogs catalogs)
         }
     }
 
-    /// Which textures each mesh in the weapon is actually drawn with.
-    ///
-    /// A Mesh asset says nothing about its appearance; the renderer that draws it holds the
-    /// materials, and Unity pairs submesh i with material i. A SkinnedMeshRenderer names its own
-    /// mesh, while a MeshRenderer leaves that to a MeshFilter on the same GameObject, so both
-    /// shapes have to be followed to cover every weapon.
     /// The same question asked of something resolved later: a skin's own model, whose closure is
     /// read when somebody opens it rather than when the weapon is selected.
     ///
@@ -385,6 +375,12 @@ public sealed class WeaponResolver(BundleSet bundles, GameCatalogs catalogs)
     public IReadOnlyList<MeshTextures> TexturesFor(string bundle, IReadOnlyList<AssetNode> assets)
         => TexturesForMeshes(bundle, assets);
 
+    /// Which textures each mesh in the weapon is actually drawn with.
+    ///
+    /// A Mesh asset says nothing about its appearance; the renderer that draws it holds the
+    /// materials, and Unity pairs submesh i with material i. A SkinnedMeshRenderer names its own
+    /// mesh, while a MeshRenderer leaves that to a MeshFilter on the same GameObject, so both
+    /// shapes have to be followed to cover every weapon.
     private IReadOnlyList<MeshTextures> TexturesForMeshes(string prefabBundle, IReadOnlyList<AssetNode> assets)
         => _dressing.OfModel(prefabBundle, assets);
 
@@ -397,11 +393,6 @@ public sealed class WeaponResolver(BundleSet bundles, GameCatalogs catalogs)
         catch (Exception e) when (e is IOException or FileNotFoundException) { return null; }
     }
 
-    /// The materials a skin names, and the textures each of them uses.
-    ///
-    /// A skin records its materials as paths relative to one of the skin roots rather than as
-    /// pointers, so they have to be looked up rather than followed. Anything that does not resolve
-    /// is left out: the tree shows what can be acted on, not what is missing.
     /// The model a skin brings with it, if it brings one. Filed under the skin's own id.
     private SkinModel? CustomModel(SkinRecord skin)
     {
@@ -411,6 +402,11 @@ public sealed class WeaponResolver(BundleSet bundles, GameCatalogs catalogs)
 
     public const string CustomModelRoot = "WeaponSkinsV2/CustomModels/";
 
+    /// The materials a skin names, and the textures each of them uses.
+    ///
+    /// A skin records its materials as paths relative to one of the skin roots rather than as
+    /// pointers, so they have to be looked up rather than followed. Anything that does not resolve
+    /// is left out: the tree shows what can be acted on, not what is missing.
     ///
     /// A skin that brings a model can name materials the lookup table has never heard of, because
     /// they are the model's own and only the model refers to them. #416's Northern Lights names

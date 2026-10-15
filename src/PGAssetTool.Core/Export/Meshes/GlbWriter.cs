@@ -340,8 +340,8 @@ public static class GlbWriter
         var index = AddRaw(buffer, views, accessors, bytes, values.Length / components, kind, componentType);
 
         // POSITION is the one accessor glTF requires bounds on, and the only one given them. Asked
-        // of every three-wide accessor, it bounded the normals too — which is how a NaN normal
-        // reached the JSON and took the whole file down with it.
+        // of every three-wide accessor it bounds the normals too, and a NaN normal in the JSON
+        // takes the whole file down with it.
         if (bounded)
         {
             var min = new float[3] { float.MaxValue, float.MaxValue, float.MaxValue };

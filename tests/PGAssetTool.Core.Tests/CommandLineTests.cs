@@ -107,8 +107,9 @@ public class CommandLineTests
     [Fact]
     public void TheToolsOwnRefusalsAreExpectedAndAnEmptySequenceIsNot()
     {
-        // Both are InvalidOperationException. One says what to do; the other is a bug, and is
-        // what an extract of a pet with no dressed mesh used to report as though it were advice.
+        // Both are InvalidOperationException. One says what to do; the other is a bug, and reported
+        // as the first it reads as advice about the game — which is what an empty LINQ sequence
+        // inside an extract does.
         Exception empty;
         try { _ = Array.Empty<(int, int)>().MaxBy(t => t.Item1); empty = null!; }
         catch (InvalidOperationException e) { empty = e; }

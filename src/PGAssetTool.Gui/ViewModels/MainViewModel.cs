@@ -87,10 +87,10 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
     /// Whether anything is going on that the window should say is going on.
     ///
-    /// The manager's work is the other half of it and was missing: turning a mod on restores and
-    /// rewrites bundles for a second or two, on its own tab, and the bar in the status line — the
-    /// one thing on screen that says the tool is doing something — stayed still throughout, because
-    /// the manager keeps a busy flag of its own and this is what the window binds.
+    /// The manager's work is the other half of it: turning a mod on restores and rewrites bundles
+    /// for a second or two, on its own tab, and the bar in the status line — the one thing on
+    /// screen that says the tool is doing something — is bound to this rather than to the busy flag
+    /// the manager keeps of its own.
     public bool Working => Busy || Manager.Busy;
 
     [ObservableProperty] private string _search = "";
@@ -342,12 +342,12 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
                 var game = _installation;
 
-                // The game as shipped, not as modded. Browsing an installed weapon showed the mod,
-                // and extracting it wrote the mod's bytes out as the weapon's own — and since a pack
-                // carries only what changed after the extract, an author could build a pack around
-                // somebody else's installed work without either of them seeing it. It also stops a
-                // protected pack being lifted straight back out of the game it went into, which is
-                // the weaker reason. Mods are checked in the game.
+                // The game as shipped, not as modded. Read as it is, browsing an installed weapon
+                // shows the mod and extracting it writes the mod's bytes out as the weapon's own —
+                // and since a pack carries only what changed after the extract, an author can build
+                // a pack around somebody else's installed work without either of them seeing it.
+                // It also stops a protected pack being lifted straight back out of the game it went
+                // into, which is the weaker reason. Mods are checked in the game.
                 _bundles = new BundleSet(game, originals: new ModStore(game).OriginalOf)
                 {
                     UnpackBudget = ReadMemory * 1024L * 1024,
@@ -364,11 +364,9 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             // back by name: a reload rebuilds these objects, and the one held before it is not the
             // one in the list afterwards.
             var was = Kind.Name;
-            // Every kind. They were held back to weapons alone while weapons were finished; the
-            // others resolve, preview, extract, pack and install through the same code, and the
-            // command line has been answering for them all along, which is how people came to be
-            // modding boots through it before the window would show one. Measured before opening
-            // it: every non-weapon kind resolves a bundle, a model and an icon for every item it
+            // Every kind: they resolve, preview, extract, pack and install through the same code as
+            // weapons, and the command line answers for them the same way. Measured over all of
+            // them, every non-weapon kind resolves a bundle, a model and an icon for every item it
             // has, in 6 to 19ms each against a weapon's 38.
             Kinds.Clear();
             foreach (var kind in _catalogs!.Kinds) Kinds.Add(kind);
@@ -737,10 +735,9 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     ///
     /// Their seals are read before anything is written, which is the only moment saying so is any
     /// use. A pack that has been changed since it was signed still installs if that is what somebody
-    /// wants: a pack is a description of changes, and the tool has always taken the view that
-    /// whoever holds one may install it. What it did not do was tell them first. The seal was read
-    /// when a row was selected in the manager — after the game had been rewritten — so the one fact
-    /// worth having before deciding arrived only after the decision.
+    /// wants: a pack is a description of changes, and whoever holds one may install it. Read when a
+    /// row is selected in the manager instead — after the game has been rewritten — and the one fact
+    /// worth having before deciding arrives only after the decision.
     public Task InstallPacks(IReadOnlyList<string> paths)
     {
         if (paths.Count == 0) return Task.CompletedTask;
@@ -872,9 +869,9 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     /// Puts the keyboard in the search box of whichever workspace is showing, and does nothing in
     /// one that has none.
     ///
-    /// It used to switch to Browse first, so Ctrl+F in the manager — which has a search of its own —
-    /// threw away the shelf you were looking at to search the weapon list instead. A shortcut that
-    /// means "find" is about what is in front of you.
+    /// A shortcut that means "find" is about what is in front of you: switching to Browse first
+    /// would have Ctrl+F in the manager — which has a search of its own — throw away the shelf
+    /// being looked at to search the weapon list instead.
     [RelayCommand]
     private void FocusSearch() => SearchRequested?.Invoke();
 
@@ -890,9 +887,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private void ToggleAlpha()
     {
-        // The pane in front. It used to be the browse one wherever you were, so the shortcut did
-        // nothing visible while the editor was open — and the editor is where a texture is being
-        // worked on, which is when the question comes up.
+        // The pane in front, rather than the browse one wherever you are: the editor is where a
+        // texture is being worked on, which is when the question comes up.
         if (Showing is { CanToggleAlpha: true } preview) preview.ShowAlpha = !preview.ShowAlpha;
     }
 
@@ -940,7 +936,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     /// Changing the language means every name in the catalogs, so the game is read again.
     /// Only the translation table depends on the language. The items, the lookup table, the skins
     /// and the search index do not, so changing which name is displayed re-reads one small bundle
-    /// rather than the whole game — it used to throw the reader away and start over.
+    /// rather than throwing the reader away and starting over.
     partial void OnLanguageChanged(string value)
     {
         // Nothing is not a language. A picker whose list is being refilled or rebuilt can pass on an
@@ -972,9 +968,9 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     /// What a pack's weapon and skin are called in the language the catalogues are open in.
     ///
     /// Looked up by number and by skin id, not by anything the pack carries: the pack was built in
-    /// whatever language its author was using, and packs built before this existed carry nothing to
-    /// translate at all. What it recorded is the last resort — better than a blank, and the honest
-    /// answer for a weapon this installation does not have.
+    /// whatever language its author was using, and some carry nothing to translate at all. What the
+    /// pack recorded is the last resort — better than a blank, and the honest answer for a weapon
+    /// this installation does not have.
     private (string? Name, string? Variant) Naming(Core.Pack.PackSubject subject)
     {
         if (_catalogs is not { } catalogs) return (null, null);
@@ -1034,10 +1030,6 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         }
     }
 
-    /// Decodes the textures the renderer drawing this mesh uses, one per submesh.
-    ///
-    /// A Mesh asset carries no appearance of its own, so without this a weapon previews as grey
-    /// geometry and the thing being judged — how a texture sits on the model — is invisible.
     /// A texture to put on the next mesh shown, if it is on the list when that mesh arrives.
     ///
     /// Set rather than applied, because it takes effect after the model does: showing a mesh puts
@@ -1057,28 +1049,6 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             ? null
             : RowFor(AllNodes(detail.Roots).Where(n => n.Within is null), _tree.MainMesh);
 
-    /// What the game draws the mesh on this row with. Null for a row nothing was found for.
-    ///
-    /// The row's own answer first, and only then the weapon's. A skin's model can point at the
-    /// weapon's own mesh rather than carrying a copy, so the same asset is on the tree twice under
-    /// two sets of materials, and the weapon's answer is right for only one of them.
-    /// The other meshes of this weapon's prefab, to be drawn with the one on this row.
-    ///
-    /// Which is the arms, in practice: `Arms_Mesh` is in 398 of 400 weapon prefabs, and the game
-    /// never shows a weapon out of them. Anything else of the prefab comes too, by the same rule —
-    /// what the prefab places, it places.
-    ///
-    /// **Only what something places.** A muzzle flash is a quad no renderer in this prefab owns a
-    /// skeleton for, and drawn unposed it sits at the origin in the middle of the picture.
-    ///
-    /// Answers the parts and what each wears, in one pass, because the second is wanted in the same
-    /// order as the first and finding them twice would be two walks of the same list.
-    /// Whether a mesh of the prefab is the player's arms rather than the item.
-    ///
-    /// Two names, because the game uses two: `Arms_Mesh`, which 398 of 400 weapon prefabs carry, and
-    /// a pair called `FPS_PLAYER_Arm_left` and `FPS_PLAYER_Arm_Right` on 22 items more. Matched
-    /// exactly and by prefix respectively, and not loosely: an avatar's own model can be called
-    /// `avatar_ programmer_arms_mesh`, and that one *is* the item.
     /// Whether a mesh of the prefab is the player's arms rather than the item.
     ///
     /// Three names, because the game uses three: `Arms_Mesh` (and `ARMS_Mesh`), which nearly every
@@ -1091,18 +1061,6 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             || name.StartsWith("FPS_PLAYER_Arm", StringComparison.OrdinalIgnoreCase)
             || (name.StartsWith("player", StringComparison.OrdinalIgnoreCase)
                 && name.Length > 6 && char.IsDigit(name[^1]));
-
-    /// Whether the game draws this mesh beside the model, which is the only thing that decides
-    /// whether a preview should.
-    ///
-    /// A MeshFilter with no MeshRenderer is a collider's geometry, and the prefabs are full of
-    /// them: `Bone_Root`, `Bone_Clips`, `Bone_Shutter` and `Bone_Bullet` mark where a magazine
-    /// leaves or a shell ejects, #28 Tree calls its one `box`, and a few weapons carry a second
-    /// pair of arms that way. Drawn, each is a white slab in the middle of the model, which is what
-    /// was reported against #7, #11, #14 and #28. Measured over 618 items: of the 26 parts small
-    /// enough to be a marker, 21 are not drawn by anything and the other five are real —
-    /// `avatar_agent_harn`'s eye, a rover's glass — so the renderer answers this and the size of a
-    /// part says nothing about it.
 
     /// Whether a part of the prefab is something the item is drawn *with* rather than part of it:
     /// the shadow under a car, a collider, a pivot marker.
@@ -1143,14 +1101,13 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             && !theirs.StartsWith(mine[..head], StringComparison.Ordinal);
     }
 
-    /// The object this item's own prefab hangs from, which every part has to be read under.
+    /// This mesh's skeleton, read under the item's own prefab where there is one to name.
     ///
     /// **Several prefabs draw the same meshes and they disagree.** A weapon's own prefab holds one
     /// arrangement and `<prefab>_info`, the one the shop shows, holds another — and `Skeleton.For`
     /// answering by mesh alone takes whichever renderer comes first in the file, which is an
-    /// accident of file order. Read that way, #1's gun came back under `Weapon1_info` and its arms
-    /// under `Weapon1`: two hierarchies, so the two were placed a metre apart with nothing saying so.
-    /// This mesh's skeleton, read under the item's own prefab where there is one to name.
+    /// accident of file order. Read that way, #1's gun comes back under `Weapon1_info` and its arms
+    /// under `Weapon1`: two hierarchies, so the two land a metre apart with nothing saying so.
     private Skeleton? Under(string bundle, long pathId)
         => (PrefabRoot is { } root ? Skeleton.For(_bundles!, bundle, pathId, root, whole: true) : null)
             ?? Skeleton.For(_bundles!, bundle, pathId, whole: true);
@@ -1160,12 +1117,12 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
     /// The rest of the prefab, to be drawn with the mesh on this row.
     ///
-    /// **Most of what this finds is the item itself, not something it is held in**, which is what
-    /// the first version of this got wrong by treating the whole lot as the arms. Measured over 811
-    /// items: of the extra meshes something places, 1,100 are parts of the item, 149 are `Arms_Mesh`
-    /// and 50 are named `vfx=`. An avatar is a head, a body and legs — 120 of 120 — a transport is a
-    /// hull and its wheels, 90 of 90 and up to 29 pieces, and a pair of boots is two meshes. Shown
-    /// one mesh at a time, every one of those is a fragment: `avatar_ programmer` was two slabs.
+    /// **Most of what this finds is the item itself, not something it is held in.** Measured over
+    /// 811 items: of the extra meshes something places, 1,100 are parts of the item, 149 are
+    /// `Arms_Mesh` and 50 are named `vfx=`. An avatar is a head, a body and legs — 120 of 120 — a
+    /// transport is a hull and its wheels, 90 of 90 and up to 29 pieces, and a pair of boots is two
+    /// meshes. Shown one mesh at a time, every one of those is a fragment: `avatar_ programmer` is
+    /// two slabs.
     ///
     /// So the parts of the item always come, and only the arms are the setting's business. An effect
     /// — the `vfx=` names, a muzzle flash or a glow — is left out either way: it is drawn by a
@@ -1235,9 +1192,18 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         IReadOnlyList<PreviewImage?>? mine, IReadOnlyList<PreviewImage?> theirs)
         => theirs.Count == 0 ? mine : [.. mine ?? [], .. theirs];
 
+    /// What the game draws the mesh on this row with. Null for a row nothing was found for.
+    ///
+    /// The row's own answer first, and only then the weapon's. A skin's model can point at the
+    /// weapon's own mesh rather than carrying a copy, so the same asset is on the tree twice under
+    /// two sets of materials, and the weapon's answer is right for only one of them.
     private MeshTextures? SlotsFor(TreeNode node)
         => node.Within?.Wearing ?? _tree?.MeshTextures.FirstOrDefault(m => m.MeshPathId == node.PathId);
 
+    /// Decodes the textures the renderer drawing this mesh uses, one per submesh.
+    ///
+    /// A Mesh asset carries no appearance of its own, so without this a weapon previews as grey
+    /// geometry and the thing being judged — how a texture sits on the model — is invisible.
     private IReadOnlyList<PreviewImage?>? TexturesFor(MeshTextures? slots)
     {
         if (slots is null) return null;
@@ -1607,8 +1573,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private async void ShowPreview(TreeNode? node)
     {
         // A skin row stands for a look rather than for an asset, so selecting one shows the weapon
-        // wearing it. It used to have to be opened for that, which also unfolded it — and going
-        // down a weapon's eight skins to see what they look like is the ordinary thing to do here.
+        // wearing it without opening the row, which would unfold it — and going down a weapon's
+        // eight skins to see what they look like is the ordinary thing to do here.
         if (node is { Skin: not null }) { OpenSkin(node); return; }
 
         if (node?.Class is not (AssetClassID.Texture2D or AssetClassID.Mesh or AssetClassID.AudioClip))

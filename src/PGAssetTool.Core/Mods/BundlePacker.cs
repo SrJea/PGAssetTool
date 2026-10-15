@@ -6,7 +6,7 @@ namespace PGAssetTool.Core.Mods;
 /// How a rebuilt bundle is compressed on its way back into the game.
 public enum BundlePacking
 {
-    /// The same size the game ships, which is what everything here did before there was a choice.
+    /// The same size the game ships.
     Smaller,
 
     /// About four times quicker to write, and about a sixth larger on disk. The game reads both at
@@ -17,21 +17,19 @@ public enum BundlePacking
 
 /// Writes a bundle back out as a compressed UnityFS file.
 ///
-/// AssetsTools.NET can do this itself and did, and it is the reason applying a mod took twenty
-/// seconds. Its `Pack(LZ4)` is LZ4**HC** — the slow, thorough end of the format — through a pure C#
-/// port that manages about 28MB/s. A game with thirty mods on it means rebuilding 180MB of bundles,
-/// and nearly all of that was this one call: 17.9 of 19 seconds, measured across every bundle the
-/// author's installation has.
+/// AssetsTools.NET can do this itself, and doing so is twenty seconds an apply. Its `Pack(LZ4)` is
+/// LZ4**HC** — the slow, thorough end of the format — through a pure C# port that manages about
+/// 28MB/s. A game with thirty mods on it means rebuilding 180MB of bundles, and that one call is
+/// nearly all of it: 17.9 of 19 seconds, measured across every bundle the author's installation has.
 ///
 /// The same bytes through a compressor written for speed take 0.9 seconds, at the same level and
 /// for the same output size, because LZ4's 128KB blocks are independent and there are as many of
 /// them as there are cores. So the compressing is done here and only the layout is borrowed.
 ///
-/// The layout borrowed is exactly what AssetsTools.NET wrote: blocks of 128KB, the block and
-/// directory table compressed and placed at the end, the file data starting at the offset the
-/// header itself says it does. That shape is not the one the game ships — the shipped bundles keep
-/// their table at the front, padded — and it is the one this tool has been writing into the game
-/// all along, so it is the shape known to work.
+/// The layout is AssetsTools.NET's own: blocks of 128KB, the block and directory table compressed
+/// and placed at the end, the file data starting at the offset the header itself says it does. That
+/// shape is not the one the game ships — the shipped bundles keep their table at the front, padded —
+/// and it is the one the game is known to load from this tool.
 internal static class BundlePacker
 {
     /// What Unity splits a bundle into, and what it expects to find on the way back in.

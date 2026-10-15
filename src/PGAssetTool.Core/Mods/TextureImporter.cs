@@ -34,8 +34,8 @@ public static class TextureImporter
     /// The original format is kept when it can be written. When it cannot, the texture is written
     /// uncompressed rather than refused. That is not a compromise on quality: re-encoding the
     /// author's artwork into a lossy block format would add compression artifacts that were never
-    /// in it, and avoiding exactly that was the reason for keeping the original format in the first
-    /// place. It costs size, and the original bytes stay in the stream file regardless.
+    /// in it, which is the whole point of keeping the original format where it can be written. It
+    /// costs size, and the original bytes stay in the stream file regardless.
     /// <param name="originalPixels">
     /// The texture as it stands, decoded to BGRA. Used only when the replacement arrives without an
     /// alpha channel: most of these textures keep something other than coverage there — emission,
@@ -45,7 +45,7 @@ public static class TextureImporter
     /// <param name="alphaIsMask">
     /// True when the file's alpha channel is the tool's own doing rather than the author's: an
     /// export masked to the part a model samples writes the mask there, because these textures are
-    /// mostly transparent to begin with and keeping the original alpha would have shown nothing.
+    /// mostly transparent to begin with and keeping the original alpha would show nothing.
     /// The original alpha is then kept on the way back in, exactly as for a file that arrived
     /// without one at all.
     /// </param>

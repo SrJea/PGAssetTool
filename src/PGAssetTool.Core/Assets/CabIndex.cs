@@ -25,7 +25,7 @@ public sealed class CabIndex
         Parallel.ForEach(bundles.BundleNames, bundle =>
         {
             // A bare manager, not an AssetsContext: that loads the engine class database, and
-            // doing so once per bundle cost thirteen seconds where the whole scan takes fifty
+            // doing so once per bundle costs thirteen seconds where the whole scan takes fifty
             // milliseconds. Reading directory names needs no type information at all.
             var manager = new AssetsManager();
             try

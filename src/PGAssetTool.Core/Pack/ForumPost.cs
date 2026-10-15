@@ -10,22 +10,22 @@ namespace PGAssetTool.Core.Pack;
 /// shows you nothing), what kind of files it replaces, and what it was made with. The layout is the
 /// user's. Previews are left to whoever posts.
 ///
-/// Which assets it replaces was considered and left out at the user's word: it would make each post
-/// longer, and fewer mods to a screen is the greater cost.
+/// Which assets it replaces is left out: it would make each post longer, and fewer mods to a screen
+/// is the greater cost.
 public static class ForumPost
 {
     /// What Discord accepts in one message without Nitro.
     public const int Limit = 2000;
 
-    /// <param name="changed">The edited files, by operation — what a built pack would carry. One row
-    /// per file, so a picture written to both default looks counts once.</param>
-    /// <param name="gameVersion">The game the author has in front of them, or null to fall back on
-    /// the one the workspace was extracted from.</param>
     /// What a pack says of the game when the game will not say. Reading the version wants an
     /// engine class database to describe `PlayerSettings` as the built game writes it, and that is
     /// the one class it does not always get right.
     public const string UnknownVersion = "unknown";
 
+    /// <param name="changed">The edited files, by operation — what a built pack would carry. One row
+    /// per file, so a picture written to both default looks counts once.</param>
+    /// <param name="gameVersion">The game the author has in front of them, or null to fall back on
+    /// the one the workspace was extracted from.</param>
     public static string For(
         PackManifest manifest, IEnumerable<string> changed, string? gameVersion, string toolVersion)
     {

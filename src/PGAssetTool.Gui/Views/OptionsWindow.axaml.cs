@@ -16,8 +16,8 @@ public partial class OptionsWindow : Window
         AvaloniaXamlLoader.Load(this);
 
         // No taller than most of the screen it opens on. The window sizes itself to its content and
-        // cannot be resized, so with every explanation open it was taller than a 1080p screen and
-        // the Close button hung off the bottom. Capped here, the list scrolls and the button stays.
+        // cannot be resized, so with every explanation open it is taller than a 1080p screen and the
+        // Close button hangs off the bottom. Capped here, the list scrolls and the button stays.
         Opened += (_, _) =>
         {
             if (Screens.ScreenFromWindow(this) is { } screen)

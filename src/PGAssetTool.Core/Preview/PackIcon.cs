@@ -32,7 +32,7 @@ public static class PackIcon
     ///
     /// The distance the preview starts at is a multiple of the model's bounding sphere, which for
     /// a rifle is most of a metre of empty air in every direction that is not along the barrel — so
-    /// a fixed distance drew a small object in a large empty square. Where the model actually lands
+    /// a fixed distance draws a small object in a large empty square. Where the model actually lands
     /// is worked out first and the framing set from it, which needs no knowledge of the shape and
     /// holds at any angle.
     ///

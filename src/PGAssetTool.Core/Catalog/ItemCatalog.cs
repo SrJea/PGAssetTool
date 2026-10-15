@@ -46,10 +46,9 @@ public sealed record WeaponRecord(
 
     /// What sort of thing this is.
     ///
-    /// Weapons unless said otherwise, because for the tool's whole first year they were the only
-    /// kind and every place that builds one of these means a weapon. Everything that reads an item
-    /// — the resolver, the tree, the preview, the exporter — goes through this rather than knowing
-    /// where weapons in particular are kept.
+    /// Weapons unless said otherwise, which is what most places that build one of these mean.
+    /// Everything that reads an item — the resolver, the tree, the preview, the exporter — goes
+    /// through this rather than knowing where weapons in particular are kept.
     public ItemKind Kind { get; init; } = ItemKinds.Weapon;
 
     /// Where the game files this one's prefab: `Weapons/Weapon834`, `Hats/hat_sweet`.

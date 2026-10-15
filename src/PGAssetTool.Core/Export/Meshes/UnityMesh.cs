@@ -91,9 +91,9 @@ public sealed record UnityMesh
     /// writer does — so the result needs it from nobody.
     ///
     /// A part that carries an outline shell comes too. Whether to cull by facing is a property of a
-    /// whole mesh and is lost in the join — a shell that filled its own part's box no longer fills
-    /// the whole item's — so the caller works it out from the parts and tells the renderer.
-    /// `avatar_bugged_cosmus` is why: its body, head and legs each carry one, and left out there was
+    /// whole mesh and is lost in the join — a shell that fills its own part's box does not fill the
+    /// whole item's — so the caller works it out from the parts and tells the renderer.
+    /// `avatar_bugged_cosmus` is why: its body, head and legs each carry one, and left out there is
     /// nothing of it to see but the arms.
     public static UnityMesh? Combined(string name, IReadOnlyList<UnityMesh> parts)
     {
@@ -177,10 +177,9 @@ public sealed record UnityMesh
     ///
     /// **The normals have to mean something.** Compared against the winding of the triangle they
     /// belong to, which is the other account of which side is out. A mesh whose two accounts disagree
-    /// cannot be asked which side is out, and culling it by facing hollows it. This was first seen on
-    /// #14 Battle Shovel, which disagreed on half its triangles — because its half-float normals were
-    /// being read four wide, not because the shovel is built that way; read right, it agrees on all
-    /// of them. The check stays, as the guard against normals that really are wrong.
+    /// cannot be asked which side is out, and culling it by facing hollows it — so one that disagrees
+    /// on more than a tenth of its triangles carries no shell as far as this is concerned. That is
+    /// the guard against normals that really are wrong.
     ///
     /// **And the mesh has to lean inwards.** Each triangle's normal is weighed against the
     /// direction out from the middle: a surface facing outwards counts for, one facing inwards
@@ -194,9 +193,10 @@ public sealed record UnityMesh
     /// Worked out on every ask rather than kept: it is one pass over the triangles and a handful of
     /// multiplications, which is nothing beside the rasterizing it decides, and a cached answer in a
     /// record is a field that quietly joins its equality.
+    ///
     /// **A shell can also be one submesh of the model rather than the whole of it**, and then the
     /// sum above is drowned: Turbo Cat's 504-triangle shell comes to -435 and its 752-triangle body
-    /// to +579, so the mesh as a whole leans outwards by +145 and the shell was drawn as a surface
+    /// to +579, so the mesh as a whole leans outwards by +145 and the shell is drawn as a surface
     /// over the cat. So each submesh is weighed on its own as well.
     ///
     /// A submesh leaning inwards is not enough by itself — 58 of the game's items have one, and
@@ -206,7 +206,7 @@ public sealed record UnityMesh
     /// two fill nine tenths of the model — Turbo Cat at 0.98 and the salesman avatar at 1.00 — and
     /// the next one down fills 0.89 while leaning inwards by only -0.013, a twentieth of Turbo
     /// Cat's -0.204. Both margins are wide and on different axes, so both are required. No weapon
-    /// is caught, which is what the author's own eyes said of them.
+    /// is caught.
     public bool CarriesAnOutline
     {
         get
@@ -313,8 +313,6 @@ public sealed record UnityMesh
             positions[to * 3 + 1] - positions[from * 3 + 1],
             positions[to * 3 + 2] - positions[from * 3 + 2]);
 
-
-
     /// Byte payloads sit either on the field itself or on its Array child, depending on the type.
     private static byte[] Bytes(AssetTypeValueField field)
     {
@@ -340,8 +338,7 @@ public sealed record UnityMesh
 
         // Counted rather than assumed: of 14,021 meshes in the first 400 bundles, 358 are packed
         // this way and every one of them is in a scene bundle — the maps, which this tool does not
-        // offer. Nothing an item is made of is compressed, which is why unpacking it has never been
-        // needed. (This used to say nothing in the game was, which was wrong.)
+        // offer. Nothing an item is made of is compressed, which is why nothing here unpacks it.
         if (field["m_MeshCompression"].AsInt != 0)
             throw new NotSupportedException(
                 $"'{name}' uses Unity's mesh compression, which packs vertices into a bit stream. "
@@ -349,9 +346,8 @@ public sealed record UnityMesh
 
         // Some meshes keep their vertices in the bundle's .resS rather than in the object, exactly
         // as most textures keep their pixels — the object then carries an empty buffer and a place
-        // to find the real one. It was refused outright, so those weapons had no model at all:
-        // #14 Battle Shovel is one, and the export wrote a field dump where a .glb should have
-        // been. The index buffer stays in the object either way.
+        // to find the real one. #14 Battle Shovel is one. The index buffer stays in the object
+        // either way.
         var stream = field["m_StreamData"];
         if (stream["path"].AsString is { Length: > 0 } outside)
         {
@@ -435,10 +431,10 @@ public sealed record UnityMesh
             }
             // A position or a normal is three components however it is kept. Unity pads a half-float
             // one out to four, because an attribute has to fill whole four-byte steps, and everything
-            // that reads these takes three a vertex. Left four wide, the preview read every vertex
-            // after the first out of its neighbours' components, and 55 main meshes in the game —
-            // eleven weapons, #14 Battle Shovel among them, and King's Crown — shaded in alternating
-            // light and dark triangles.
+            // that reads these takes three a vertex. Left four wide, every vertex after the first is
+            // read out of its neighbours' components, and 55 main meshes in the game — eleven
+            // weapons, #14 Battle Shovel among them, and King's Crown — shade in alternating light
+            // and dark triangles.
             var keep = channel.Attribute is VertexAttribute.Position or VertexAttribute.Normal
                 ? Math.Min(channel.Dimension, 3)
                 : channel.Dimension;

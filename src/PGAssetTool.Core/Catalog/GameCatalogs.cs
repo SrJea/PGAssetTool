@@ -96,7 +96,7 @@ public sealed class GameCatalogs
     /// The same registries read again in another language.
     ///
     /// Only the translation table depends on the language; the items, the lookup table, the skins
-    /// and the search index do not. Rebuilding all of them to change which name is displayed cost
+    /// and the search index do not. Rebuilding all of them to change which name is displayed costs
     /// the better part of a second for no reason.
     public GameCatalogs WithLanguage(BundleSet bundles, string language)
         => new(Items, Lookup, Localization.Load(bundles, language), Skins, Gear) { Names = Names };

@@ -120,8 +120,8 @@ public sealed record ToolSettings
     public bool LighterApplies { get; init; }
 
     /// How many megabytes of bundles the reader may keep unpacked in memory, for browsing and
-    /// extracting. See BundleUnpacker: resolving a weapon went from about 110ms to about 10 with its
-    /// bundles unpacked. Zero reads everything from disk a block at a time, as before.
+    /// extracting. See BundleUnpacker: resolving a weapon takes about 10ms with its bundles
+    /// unpacked against about 110ms without. Zero reads everything from disk a block at a time.
     public int ReadMemory { get; init; } = 1024;
 
     private static readonly JsonSerializerOptions Json = new()

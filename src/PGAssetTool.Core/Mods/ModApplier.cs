@@ -71,10 +71,9 @@ public sealed class ModApplier(GameInstallation game, ModStore store)
         // Each pack claims its assets as it goes in, so a later one in the same batch displaces an
         // earlier one the same way it displaces something installed last week.
         //
-        // Installing is how a mod usually comes to be on, and it was the one route that skipped
-        // this: turning a mod on stood the others down, and installing one enrolled it enabled and
-        // said nothing. Two skins for #401 arrived both on, both writing the same texture, and only
-        // one of them was in the game.
+        // Installing is how a mod usually comes to be on, so it stands rivals down exactly as
+        // turning one on does. Two skins for #401 both enabled write the same texture, and only
+        // one of them is in the game.
         var enrolled = packPaths.Select(p => Enrol(mods, p, gameVersion)).ToList();
         displaced.AddRange(StandAside(mods, enrolled));
 
@@ -132,9 +131,9 @@ public sealed class ModApplier(GameInstallation game, ModStore store)
     /// Turns off whatever else was writing the same assets as the mods just turned on.
     ///
     /// Two mods that write the same texture do not both take effect; the reconcile applies them in
-    /// the order they were installed and the last one wins, silently. Which of two skins for one
-    /// weapon a player is actually running was then a question the manager could not answer, and
-    /// turning one on appeared to do nothing at all.
+    /// the order they were installed and the last one wins, silently. Left to that, which of two
+    /// skins for one weapon a player is actually running is a question the manager cannot answer,
+    /// and turning one on appears to do nothing at all.
     ///
     /// Judged on the assets themselves rather than on the item they belong to. Two mods for one
     /// weapon that touch nothing in common — a new model and a new shop icon, say — are a
@@ -143,13 +142,13 @@ public sealed class ModApplier(GameInstallation game, ModStore store)
     ///
     /// Read out of the packs at the moment it is asked rather than kept in the ledger. It is a
     /// handful of small files, read once per turning-on, against a reconcile that rewrites every
-    /// bundle the mods touch — and reading them is what makes the answer true for a mod installed
-    /// before any of this existed.
+    /// bundle the mods touch — and reading them is what makes the answer true for a mod whose
+    /// ledger entry says nothing about what it writes.
     ///
-    /// The mods being turned on are held to this as well as everyone else, which is the half that
-    /// was missing: select every row and turn them on, and thirty-nine mods all went on together,
-    /// rivals included. Whoever came last wins, because that is the order a reconcile applies them
-    /// in — so the answer here and the file that ends up in the game agree.
+    /// The mods being turned on are held to this as well as everyone else: select every row and
+    /// turn them on, and otherwise thirty-nine mods go on together, rivals included. Whoever came
+    /// last wins, because that is the order a reconcile applies them in — so the answer here and
+    /// the file that ends up in the game agree.
     private List<string> StandAside(List<InstalledMod> mods, IReadOnlyList<string> ids)
     {
         var claimed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -236,9 +235,9 @@ public sealed class ModApplier(GameInstallation game, ModStore store)
     /// Also runs after a game update, which is when backups for superseded bundle versions go stale.
     ///
     /// Bundles already holding exactly what this run would put into them are left where they are.
-    /// The restoring and reapplying is the same work whether one mod changed or none did, so a
-    /// toggle used to rebuild every bundle any mod anywhere had touched: seventeen of them, to
-    /// change one.
+    /// The restoring and reapplying is the same work whether one mod changed or none did, so
+    /// without that a toggle rebuilds every bundle any mod anywhere has touched: seventeen of them,
+    /// to change one.
     ///
     /// An operation whose asset is not where the pack says is looked for in the rest of the item's
     /// bundles, and if it is found there the whole thing runs once more with that written down. See
@@ -305,9 +304,9 @@ public sealed class ModApplier(GameInstallation game, ModStore store)
 
             // Tidying up is not worth losing the reason for. This is a temporary directory, and
             // something holding one of its files open — a virus scanner reading what was just
-            // written is the ordinary case — used to throw from inside the finally, which both
-            // ended a successful apply as a failure and threw away whatever the real trouble had
-            // been when there was one.
+            // written is the ordinary case — throws from inside the finally, which both ends a
+            // successful apply as a failure and throws away whatever the real trouble was when
+            // there was one.
             try { staging.Delete(recursive: true); }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException)
             {
@@ -403,11 +402,11 @@ public sealed class ModApplier(GameInstallation game, ModStore store)
     /// and the modified bundle would be left in place.
     ///
     /// The file is hashed once and the answer used twice. A bundle that already matches what the
-    /// game shipped needs nothing doing — a backup outlives the mod that caused it, so this used to
-    /// copy every bundle the tool had ever touched over an identical copy of itself. And a bundle
-    /// that matches what this tool last wrote into it, from the same mods in the same order, needs
-    /// nothing doing either: putting it back and building it again would arrive at the file already
-    /// there.
+    /// game shipped needs nothing doing — a backup outlives the mod that caused it, so without this
+    /// every bundle the tool has ever touched is copied over an identical copy of itself. And a
+    /// bundle that matches what this tool last wrote into it, from the same mods in the same order,
+    /// needs nothing doing either: putting it back and building it again would arrive at the file
+    /// already there.
     ///
     /// Both halves of that have to hold. The recipe says the answer would be the same; the hash says
     /// nobody has been at the file since. Anything else — a game update, an edit from outside, a
@@ -466,10 +465,9 @@ public sealed class ModApplier(GameInstallation game, ModStore store)
     /// is nothing beside rebuilding a bundle that did not need it.
     ///
     /// And how it is to be squeezed. The same mods packed for speed and packed for size are two
-    /// different files, so a bundle written one way is not already what a run asked for the other way
-    /// would write. Left out, a bundle applied from the window with speed on was left alone by the
-    /// next reconcile asked for size, and rebuilding everything then arrived at different bytes —
-    /// which the self-test caught the first time a mod of the author's was enabled while it ran.
+    /// different files, so a bundle written one way is not already what a run asked for the other
+    /// way would write. Left out, a bundle applied with speed on is left alone by the next
+    /// reconcile asked for size, and rebuilding everything then arrives at different bytes.
     private string RecipeFor(IReadOnlyList<Contribution> parts)
     {
         var recipe = new System.Text.StringBuilder();
@@ -542,10 +540,9 @@ public sealed class ModApplier(GameInstallation game, ModStore store)
             // file read whole into memory, and a mod that writes to four bundles would otherwise
             // be read four times.
             //
-            // A pack that will not open is this mod's failure and not the run's. It used to come
-            // back out of here and end the reconcile before anything had been looked at, so one
-            // damaged file among a hundred meant nothing in the manager worked at all — and the
-            // way to find out which file it was was to read the message and go looking.
+            // A pack that will not open is this mod's failure and not the run's: coming back out of
+            // here would end the reconcile before anything else had been looked at, so one damaged
+            // file among a hundred would stop the manager working at all.
             ZipArchive archive;
             List<PackOperation> operations;
             try
@@ -603,11 +600,11 @@ public sealed class ModApplier(GameInstallation game, ModStore store)
 
     /// Writes every enabled mod into the game, a bundle at a time, several bundles at once.
     ///
-    /// A bundle at a time and not a mod at a time, which is how this used to work. Each pass over a
-    /// bundle decompresses it, edits it and compresses it again, and going mod by mod meant one such
-    /// pass per mod — so a bundle that thirty mods write to was rebuilt thirty times over. The work
-    /// was never in the edits: with thirty-one mods installed a toggle took thirty-eight seconds, of
-    /// which thirty-seven were this, for forty operations in total.
+    /// A bundle at a time and not a mod at a time. Each pass over a bundle decompresses it, edits
+    /// it and compresses it again, so mod by mod is one such pass per mod — a bundle that thirty
+    /// mods write to rebuilt thirty times over. The work is never in the edits: thirty-one mods
+    /// installed and forty operations between them, and done that way a toggle spends thirty-seven
+    /// of its thirty-eight seconds here.
     ///
     /// The bundles themselves have nothing to do with each other — different files, different
     /// backups, different packs — so they are rebuilt side by side, largest first so the longest job
@@ -691,10 +688,9 @@ public sealed class ModApplier(GameInstallation game, ModStore store)
             foreach (var id in outcome.Wrote) touchedByMod[id][bundle] = outcome.Job.Hash;
 
             // Recorded as built only when everything meant for it went in. The recipe is what was
-            // asked for, not what came out, so a bundle where one operation failed was written down
-            // as holding that operation too — and once whatever stopped it was put right, every
-            // later reconcile left the bundle alone as already correct. A glider's mesh that the
-            // importer could not read stayed out of the game after the importer learned to.
+            // asked for, not what came out, so a bundle where one operation failed would be written
+            // down as holding that operation too, and every later reconcile would then leave it
+            // alone as already correct — even once whatever stopped that operation was put right.
             if (outcome.Wrote.Count > 0 && outcome.Failed.Count == 0)
                 written[bundle] = new WrittenBundle(recipes[bundle], outcome.Holds);
             else written.Remove(bundle);
@@ -722,10 +718,10 @@ public sealed class ModApplier(GameInstallation game, ModStore store)
 
         // One bundle going wrong is that bundle's failure, not the whole install's. A disk that
         // fills up, a file the system has locked, a library that throws at something it has never
-        // seen — any of those used to come back out of the parallel loop and end the reconcile
-        // where it stood, with the bundles already renamed into place and nothing written down
-        // about them. What is left behind here instead is the original: the rename is the last
-        // step, and the half-written file is thrown away.
+        // seen — any of those coming back out of the parallel loop would end the reconcile where it
+        // stood, with the bundles already renamed into place and nothing written down about them.
+        // What is left behind here instead is the original: the rename is the last step, and the
+        // half-written file is thrown away.
         try
         {
             wrote = EditBundle(job.Live, rewritten, job.Parts, job.Staging, applied, failed, shared, lost);

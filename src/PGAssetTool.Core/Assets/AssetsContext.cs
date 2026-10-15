@@ -66,10 +66,11 @@ public sealed class AssetsContext : IDisposable
     /// What an object is called, as `AssetNaming.NameOf` would read it off the whole object.
     ///
     /// Most classes keep `m_Name` as their first field, and for those the name is read straight off
-    /// the file. Finding a texture by name meant deserializing every object in its bundle — pixels,
-    /// vertex buffers and all — and that was most of what extracting a weapon cost: #16 allocated
-    /// 17GB to write fifteen files. A Shader, which keeps its name elsewhere, and anything whose
-    /// name sits behind a field of a size only reading it would tell, are read whole, as before.
+    /// the file. Read off the whole object instead, finding a texture by name deserializes every
+    /// object in its bundle — pixels, vertex buffers and all — which is most of what extracting a
+    /// weapon costs: 17GB allocated to write #16's fifteen files. A Shader, which keeps its name
+    /// elsewhere, and anything whose name sits behind a field of a size only reading it would tell,
+    /// are read whole.
     public string NameOf(AssetsFileInstance file, AssetFileInfo info)
     {
         var cls = (AssetClassID)info.TypeId;
@@ -214,16 +215,15 @@ public static class ClassPackage
 
 public static class GameVersion
 {
-    /// PlayerSettings.bundleVersion, e.g. "26.11.0". The game never downgrades, so a change in this
+    /// PlayerSettings.bundleVersion, e.g. "26.13.0". The game never downgrades, so a change in this
     /// value is a reliable update signal.
-    /// `PlayerSettings` is read as far as this field and no further, and the field after it is
-    /// looked at as a string.
     ///
-    /// The class is one the stock engine class database does not describe as a built game writes
-    /// it. Read whole against the game on Unity 6000.3.14f1, it runs off the end of its 908 bytes
-    /// at field 150 of 175 — so nothing in `globalgamemanagers` could be read at all, though 400 of
-    /// 400 objects in `globalgamemanagers.assets` can. The fields up to `bundleVersion`, field 136,
-    /// do line up: `companyName` and `productName` come out right.
+    /// `PlayerSettings` is read as far as this field and no further, and the field after it is
+    /// looked at as a string. The class is one the stock engine class database does not describe as
+    /// a built game writes it: read whole against the game on Unity 6000.3.14f1 it runs off the end
+    /// of its 908 bytes at field 150 of 175, so nothing in `globalgamemanagers` reads at all, though
+    /// 400 of 400 objects in `globalgamemanagers.assets` do. The fields up to `bundleVersion`, field
+    /// 136, line up: `companyName` and `productName` come out right.
     ///
     /// The build carries one string there that the database does not list, so what the database
     /// calls `bundleVersion` is the field before the real one — '1.0' where the game shows
@@ -269,11 +269,10 @@ public static class GameVersion
 
     /// The version if it can be read, and null if it cannot.
     ///
-    /// Every caller asked the first of the two questions this answers — whether the engine class
-    /// database is there to read the file with — and wrote the same line to do it. None asked the
-    /// second: the file being read is the game's own, so it can be missing or damaged like anything
-    /// else of theirs, and it is read while building a pack and while installing one, neither of
-    /// which is worth stopping over a version string.
+    /// Both questions in one place: whether the engine class database is there to read the file
+    /// with, and whether the file reads. It is the game's own file, so it can be missing or damaged
+    /// like anything else of theirs, and it is read while building a pack and while installing one,
+    /// neither of which is worth stopping over a version string.
     public static string? Of(AssetsContext context, GameInstallation game)
     {
         if (!context.HasClassDatabase) return null;

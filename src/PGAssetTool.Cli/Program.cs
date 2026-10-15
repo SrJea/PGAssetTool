@@ -163,8 +163,8 @@ static int Run(CommandLine line)
 
     // The game as shipped: show and extract are about the item, not about whatever mod is
     // installed over it. Anything that writes or verifies goes to the installation directly.
-    // Unpacked into memory up to a limit, because reading them from disk a block at a time was most of
-    // what resolving and extracting cost. See BundleUnpacker.
+    // Unpacked into memory up to a limit, because reading them from disk a block at a time is most
+    // of what resolving and extracting costs. See BundleUnpacker.
     using var bundles = new BundleSet(game, originals: new ModStore(game).OriginalOf)
     {
         UnpackBudget = line.Number("read-memory", 1024) * 1024L * 1024,
@@ -479,7 +479,7 @@ static int Mods(GameInstallation game)
     if (installed.Count == 0) Console.WriteLine("Nothing installed.");
 
     // As wide as the longest there is, so the columns line up: an id is the item's id, its look and
-    // eight characters more, and a fixed width ran most of them into the name beside them.
+    // eight characters more, and a fixed width runs most of them into the name beside them.
     var idWidth = installed.Select(m => TextColumn.DisplayWidth(m.Id)).DefaultIfEmpty(0).Max();
     var nameWidth = Math.Min(40, installed.Select(m => TextColumn.DisplayWidth(m.Name)).DefaultIfEmpty(0).Max());
 
@@ -519,7 +519,7 @@ static int Change(CommandLine line, GameInstallation game, BundleSet bundles, La
 
     // Everything past here rewrites the game's bundles, and the game holds them open while it runs:
     // a write that lands in the middle of that leaves a half-written file where a bundle was. The
-    // manager and the editor have always refused; this had not, and it is the same game.
+    // manager and the editor refuse for the same reason; it is the same game.
     if (GameProcess.IsRunning(game)) return GameIsRunning();
 
     // Said before the game is written to rather than after, and said whichever way it goes: a
@@ -902,7 +902,7 @@ static string Heading(WeaponRecord record, WeaponTree tree)
 static string ModNamed(IReadOnlyList<InstalledMod> mods, string text)
 {
     // No id begins or ends in white space, and a carriage return copied in with one from a list
-    // made on Windows turned a mod that is plainly installed into one that is not.
+    // made on Windows turns a mod that is plainly installed into one that is not.
     text = text.Trim();
     if (mods.FirstOrDefault(m => m.Id == text) is { } exact) return exact.Id;
 

@@ -5,15 +5,14 @@ namespace PGAssetTool.Core.Preview;
 
 /// How the model is being looked at: one orientation, how far back, and what is held in the middle.
 ///
-/// The orientation is a whole rotation rather than a yaw, a pitch and a roll. It was three angles
-/// for a long time and that made a turntable — sideways turned the model about one axis of its own,
-/// whatever the picture was tilted to, and the pitch stopped at the poles because past them a drag
-/// to the right walked the viewer left. Every one of those is a property of holding the rotation as
-/// three numbers in a fixed order, and none of them survives holding it as one.
+/// The orientation is a whole rotation rather than a yaw, a pitch and a roll. Three numbers in a
+/// fixed order make a turntable — sideways turns the model about one axis of its own, whatever the
+/// picture is tilted to, and the pitch has to stop at the poles, past which a drag to the right
+/// walks the viewer left. One rotation has none of that.
 ///
-/// What is given up is that there is no longer a level horizon holding the model upright: a
-/// trackball can leave it leaning, and square-on is reached by asking for it rather than by dragging
-/// carefully. <see cref="Facing"/> and the named views are what ask.
+/// What is given up is a level horizon holding the model upright: a trackball can leave it leaning,
+/// and square-on is reached by asking for it rather than by dragging carefully.
+/// <see cref="Facing"/> and the named views are what ask.
 /// <param name="Turn">
 /// From the model's own space to the viewer's. Kept as a quaternion because nothing about a drag
 /// knows which axis it is about, and composing turns is what a drag does.
@@ -30,8 +29,8 @@ namespace PGAssetTool.Core.Preview;
 ///
 /// This is what turning happens around, so panning something to the middle and then turning keeps
 /// it there — pan the muzzle of a rocket launcher into view, turn, and the muzzle stays in view.
-/// Holding the offset in the frame instead would have turned the model about its own centre and
-/// swung whatever was being looked at straight back out of the frame.
+/// Holding the offset in the frame instead turns the model about its own centre and swings whatever
+/// is being looked at straight back out of the frame.
 ///
 /// In radii rather than in model units so it means the same thing on a pistol and a launcher, and
 /// so a resized pane keeps the framing rather than throwing it away.
@@ -41,12 +40,11 @@ public sealed record Camera
     /// Where a view starts: the angle the game draws its own `icon1_big` shop pictures at, so an
     /// author opening a weapon meets the shape they already know rather than a technical view of it.
     ///
-    /// Measured rather than chosen. Fitting the silhouette to the icons never rose above about 0.8
-    /// and never sharply — the icons carry a drawn outline that fattens their shape — so the author
-    /// matched 55 weapons by hand and the angles were read back against each frame the tool might
+    /// Measured, not chosen: 55 weapons matched by hand, read back against each frame the tool can
     /// stand a model up in. Against the bounding box with the muzzle faced they agree to within 5
     /// degrees; against the bounding box alone the yaw spreads three times as far, which is what
-    /// facing the model is worth.
+    /// facing the model is worth. Fitting the silhouette to the icons themselves tops out around
+    /// 0.8 and never sharply, the icons carrying a drawn outline that fattens their shape.
     ///
     /// The 39 that fire agree to 4.6 degrees of yaw. The 16 that do not spread over 35 and sit
     /// around the same middle: a blade has no convention rather than a different one, so there is
@@ -64,11 +62,11 @@ public sealed record Camera
     public float PivotY { get; init; }
     public float PivotZ { get; init; }
 
-    /// A view facing the model the way a yaw, a pitch and a roll used to describe it.
+    /// A view facing the model the way a yaw, a pitch and a roll describe it.
     ///
-    /// Kept because a named view is exactly that — "from the front", "from above" — and because
-    /// every angle written down anywhere in this repository is in those terms. Distance and pivot
-    /// are the framing and belong to whoever set them, so this only says which way to face.
+    /// A named view is exactly that — "from the front", "from above" — and every angle written down
+    /// anywhere in this repository is in those terms. Distance and pivot are the framing and belong
+    /// to whoever set them, so this only says which way to face.
     public static Camera Facing(float yaw, float pitch, float roll = 0f)
         => new() { Turn = Orientation(yaw, pitch, roll) };
 
@@ -102,10 +100,8 @@ public sealed record Camera
     /// tips its top towards the viewer, and a diagonal does both at once. Nothing here is an axis of
     /// the model, so there is no axis to become unstable and no pole to collapse at.
     ///
-    /// Chosen by trying it. The turntable it replaces, an arcball where the point under the cursor
-    /// stays under the cursor, and this were built side by side and driven against the same
-    /// models; this is the one that was kept. What it gives up is that a closed loop of the cursor
-    /// does not bring the model back to where it started, which nobody noticed.
+    /// What it gives up is that a closed loop of the cursor does not bring the model back to where
+    /// it started.
     public Camera Dragged(float right, float down)
     {
         var angle = MathF.Sqrt(right * right + down * down);
@@ -137,12 +133,11 @@ public sealed record Camera
 
     public Camera Zoomed(float factor) => this with { Distance = Math.Clamp(Distance * factor, 0.4f, 20f) };
 
-    /// A yaw, a pitch and a roll as one rotation, in the order the frame used to be built in: face
-    /// the model, tilt up, then turn the picture in its own plane.
+    /// A yaw, a pitch and a roll as one rotation, in the order the frame is built in: face the
+    /// model, tilt up, then turn the picture in its own plane.
     ///
-    /// Read out of the frame rather than composed, so that a named view means exactly what it has
-    /// always meant. The trigonometry below is the frame the renderer was written against, and
-    /// deriving the quaternion from it is the only way to be sure the two agree.
+    /// Read out of the frame rather than composed. The trigonometry below is the renderer's own
+    /// frame, and deriving the quaternion from it is the only way to be sure the two agree.
     private static Quaternion Orientation(float yaw, float pitch, float roll)
     {
         var (cy, sy) = (MathF.Cos(yaw), MathF.Sin(yaw));
@@ -177,18 +172,10 @@ public sealed record Camera
 /// camera.
 public readonly record struct Viewpoint(MeshRenderer.Basis Standing, MeshRenderer.Basis View);
 
-/// Draws a mesh into a pixel buffer, in software.
-///
-/// Avalonia has no 3D of its own, and reaching for OpenGL would trade a few hundred lines for a
-/// dependency on whatever driver the machine happens to have. These meshes are tiny — the largest
-/// weapon in the game is a few thousand triangles — so a plain z-buffered rasterizer cannot fail to
-/// initialise, and the cost is in the pixels rather than the triangles. Filled on every core it
-/// redraws a model filling half of a 2400x1500 pane in 5–7ms.
 /// The buffers a preview draws into, kept across frames.
 ///
-/// The depth buffer is the size of the frame, and allocating one per frame is what made a large
-/// preview pane expensive: eleven megabytes a frame at 2000x1500, all of it immediately garbage.
-/// Held here, a frame allocates nothing at all.
+/// The depth buffer is the size of the frame — eleven megabytes at 2000x1500 — and one allocated
+/// per frame is all immediately garbage. Held here, a frame allocates nothing at all.
 public sealed class RenderTarget
 {
     public int Width { get; private set; }
@@ -216,6 +203,13 @@ public sealed class RenderTarget
     }
 }
 
+/// Draws a mesh into a pixel buffer, in software.
+///
+/// Avalonia has no 3D of its own, and reaching for OpenGL would trade a few hundred lines for a
+/// dependency on whatever driver the machine happens to have. These meshes are tiny — the largest
+/// weapon in the game is a few thousand triangles — so a plain z-buffered rasterizer cannot fail to
+/// initialise, and the cost is in the pixels rather than the triangles. Filled on every core it
+/// redraws a model filling half of a 2400x1500 pane in 5–7ms.
 public static class MeshRenderer
 {
     /// <param name="textures">
@@ -241,7 +235,7 @@ public static class MeshRenderer
     ///
     /// The outline shell is a property of a whole mesh, and several meshes of one item are shown
     /// joined — so the answer has to come from the parts rather than from the join, where a shell
-    /// that filled its own part's box no longer fills the whole item's and stops being found.
+    /// that fills its own part's box does not fill the whole item's and stops being found.
     /// Culling where nothing is shelled costs nothing: a closed model's far side is behind its
     /// near one either way.
     /// </param>
@@ -344,11 +338,10 @@ public static class MeshRenderer
 
         // Filled a band of rows at a time, one band per core, each band clearing its own rows first.
         //
-        // One thread over every pixel was what a large pane cost: at 2400x1500 with a model filling
-        // half of it, 87–90ms a frame — eleven a second — and 36ms at 1400x1000, which is a drag that
-        // visibly lags the cursor. Bands share no pixels, and within each the triangles go in the
-        // order they always did, so which one wins a pixel is decided exactly as before and the
-        // picture is the same to the byte.
+        // One thread over every pixel costs 87–90ms a frame at 2400x1500 with a model filling half
+        // of it — eleven a second — and 36ms at 1400x1000, which is a drag that visibly lags the
+        // cursor. Bands share no pixels, and within each the triangles go in the order they were
+        // gathered, so which one wins a pixel is decided exactly as it would be on one thread.
         var triangles = pending;
         var drawn = count;
         var bands = Math.Clamp(Environment.ProcessorCount, 1, Math.Max(height / 32, 1));
@@ -383,10 +376,9 @@ public static class MeshRenderer
     /// Where the model lands on screen for a given view, in half-frames from the middle: -1 is the
     /// left or top edge of a square frame, +1 the right or bottom.
     ///
-    /// Measured from the vertices rather than from what was drawn, because a drawing is clipped.
-    /// A model three times too wide for the frame covers it edge to edge, and everything read off
-    /// that says the framing is already perfect — which is why an icon of a long weapon, zoomed in,
-    /// came out with both ends cut off however many times the framing was corrected.
+    /// Measured from the vertices rather than from what was drawn, because a drawing is clipped:
+    /// a model three times too wide for the frame covers it edge to edge, and everything read off
+    /// that says the framing is already perfect.
     public static (float Left, float Top, float Right, float Bottom)? Extent(
         UnityMesh mesh, Camera camera, Viewpoint? viewpoint = null)
     {
@@ -615,7 +607,7 @@ public static class MeshRenderer
     ///
     /// The first row is the *negative* of the frame's own right axis, because forward points at the
     /// viewer: they stand on the far side of the model from Unity's own camera, and what that
-    /// camera has on its right is on their left. Taking it as right drew every model as its own
+    /// camera has on its right is on their left. Taking it as right draws every model as its own
     /// mirror image — invisible on a gun, obvious the moment a texture has writing on it. So this
     /// is an orthonormal frame with a determinant of minus one, and reading that as a mistake is
     /// the mistake. <see cref="Of"/> and <see cref="Turn"/> are where the sign is put on and taken

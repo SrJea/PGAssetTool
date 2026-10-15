@@ -58,8 +58,8 @@ public sealed class PackAuthor : IDisposable
     ///
     /// Taken from the key as the framework writes it rather than from the bytes as they arrived.
     /// ImportSubjectPublicKeyInfo stops at the end of the structure and says nothing about what
-    /// follows it, so bytes appended to a public key went on verifying every signature exactly as
-    /// before while hashing to a different fingerprint — the key and the fingerprint naming two
+    /// follows it, so bytes appended to a public key go on verifying every signature exactly as
+    /// they did while hashing to a different fingerprint — the key and the fingerprint naming two
     /// different things, which is the one thing a fingerprint must never do. Trailing bytes are
     /// refused outright, and what is hashed is what was actually imported.
     public static string FingerprintOf(byte[] publicKey)

@@ -282,10 +282,9 @@ public class MeshRendererTests
     [Fact]
     public void DraggingRightMovesTheNearFaceRightAtEveryAngle()
     {
-        // The property the pole used to break. Whatever the model has been turned to, a drag to the
-        // right takes it with the cursor — the face that was towards the viewer moves towards the
-        // right of the screen. Asked of the frame rather than of an angle, because there is no
-        // longer an angle to ask.
+        // The property a pole breaks. Whatever the model has been turned to, a drag to the right
+        // takes it with the cursor — the face that was towards the viewer moves towards the right
+        // of the screen. Asked of the frame rather than of an angle, there being no angle to ask.
         var at = new Camera();
 
         for (var step = 0; step < 60; step++)
@@ -345,8 +344,8 @@ public class MeshRendererTests
     [Fact]
     public void AnAngleAskedForIsTheAngleThatComesBack()
     {
-        // Named views are still written as a yaw, a pitch and a roll, and every angle recorded
-        // anywhere in this repository is in those terms. Facing has to mean what it used to.
+        // Named views are written as a yaw, a pitch and a roll, and every angle recorded anywhere
+        // in this repository is in those terms, so Facing has to answer in them exactly.
         foreach (var (yaw, pitch, roll) in new[]
                  {
                      (0f, 0f, 0f), (0.4f, 0.2f, 0f), (2.1f, -0.4f, 1.1f),
@@ -471,10 +470,10 @@ public class MeshRendererTests
     [Fact]
     public void RedrawingTheSameSizeAllocatesNoFrameBuffers()
     {
-        // Allocating a depth buffer per frame is what made a large preview pane expensive — eleven
+        // A depth buffer allocated per frame is what makes a large preview pane expensive — eleven
         // megabytes a frame at 2000x1500, all of it immediately garbage.
         //
-        // Not nothing at all any more: a frame is filled on every core, and handing the bands to the
+        // Not nothing at all, though: a frame is filled on every core, and handing the bands to the
         // thread pool costs a closure and some bookkeeping — about two kilobytes a frame, where a
         // frame's own buffers come to fifteen megabytes at this size. So the bound is that twenty
         // frames together allocate less than one depth buffer, which is the thing this is here for.
@@ -777,9 +776,8 @@ public class MeshRendererTests
     [Fact]
     public void ADragMeansTheSameOnScreenWhateverTheModelHasBeenTurnedTo()
     {
-        // The complaint that started this. A turntable turns about one axis of the model, so once
-        // the picture is tilted a sideways drag turns it about something that no longer looks
-        // vertical — the axis wanders as you work.
+        // A turntable turns about one axis of the model, so once the picture is tilted a sideways
+        // drag turns it about something that does not look vertical — the axis wanders as you work.
         //
         // What a trackball promises instead is that the drag is a movement of the picture: the turn
         // it adds, read in the frame the viewer is looking at, is the same turn whatever the model

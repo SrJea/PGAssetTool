@@ -426,8 +426,8 @@ public sealed partial class PreviewViewModel(AlphaPreference? alpha = null) : Ob
         Nothing = null;
 
         // What the asset is, until somebody says otherwise — and then what they said, for every
-        // picture after it. Resetting to the automatic answer each time meant an icon came back with
-        // its alpha honoured however many times it had just been turned off.
+        // picture after it. Reset to the automatic answer each time, an icon comes back with its
+        // alpha honoured however many times it has just been turned off.
         var wanted = _alpha.Chosen ?? alphaIsCoverage;
 
         // Assigning the property redraws through its change handler, but only when the value moves.
@@ -531,8 +531,8 @@ public sealed partial class PreviewViewModel(AlphaPreference? alpha = null) : Ob
     /// mesh looks like wearing a different skin, and a skin is not per-submesh.
     ///
     /// **The model, and not what is shown beside it.** The parts of an item keep their own pictures:
-    /// a weapon's skin is cut for the weapon, and painted over the arms as well it came out as a
-    /// smear of the gun's paint where the hands should be. The model's submeshes come first in the
+    /// a weapon's skin is cut for the weapon, and painted over the arms as well it is a smear of
+    /// the gun's paint where the hands should be. The model's submeshes come first in the
     /// join, so they are the ones at the front of this list.
     public void Wear(PreviewImage picture)
     {
@@ -578,13 +578,6 @@ public sealed partial class PreviewViewModel(AlphaPreference? alpha = null) : Ob
     }
 }
 
-/// A texture offered for a mesh preview: what it is called and where to find it, and nothing else.
-///
-/// Deliberately without the decoded picture. It used to carry one, filled in once the texture had
-/// been read — but a record is compared by its contents, so the filled-in copy was a different value
-/// from the one in the list the combo box was showing. The combo box, asked to select something it
-/// did not have, selected nothing instead, and the model went straight back to the texture it
-/// started with. Picking a skin appeared to do nothing at all.
 /// A named way of facing a model. Which way it faces and how it is tilted: the rest of the camera
 /// is the framing, which belongs to whoever set it.
 public sealed record ViewPreset(string Name, float Yaw, float Pitch, float Roll = 0f)
@@ -600,6 +593,12 @@ public sealed record MotionChoice(Motion Motion)
     public override string ToString() => Motion.Name;
 }
 
+/// A texture offered for a mesh preview: what it is called and where to find it, and nothing else.
+///
+/// Deliberately without the decoded picture. A record is compared by its contents, so a copy
+/// carrying one, filled in once the texture has been read, is a different value from the one in the
+/// list the combo box is showing — and a combo box asked to select something it does not have
+/// selects nothing instead, which puts the model straight back into the texture it started with.
 public sealed record TextureChoice(string Name, string Bundle, long PathId)
 {
     /// True for a texture the mesh in front of you is actually drawn with, which the list marks so

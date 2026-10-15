@@ -8,22 +8,22 @@ namespace PGAssetTool.Core.Preview;
 /// Which way round a weapon is, from the prefab rather than from the shape of it.
 ///
 /// The renderer stands a model up by sorting its bounding box, which says which side is longest and
-/// nothing about which end is the barrel — so half the weapons in the game opened pointing at the
-/// viewer's left and half at their right, and there was no telling which without looking.
+/// nothing about which end is the barrel — so left to that, half the weapons in the game open
+/// pointing at the viewer's left and half at their right, with no telling which without looking.
 ///
 /// Guessing it from the geometry does not work. Four signals were measured against 157 weapons the
 /// author labelled by hand, and all four read the same thing — that one end of a weapon carries
 /// more of it than the other. The best of them, counting vertices, called 74.5%. The thinner-end
 /// guess that DESIGN.md records at 46 of 73 came out at 61.1% over the larger set.
 ///
-/// The prefab was never asked, and it knows: a gun has a `GunFlash` at its muzzle, a
+/// The prefab answers it outright: a gun has a `GunFlash` at its muzzle, a
 /// `BulletSpawnPoint` where the shot leaves it, and a `Point_Arm_Left` where the hand goes. Over
 /// the same 157 the first of those the prefab carries is right for 150 of the 151 it answers for.
 public static class Facing
 {
     /// Objects at the far end of a weapon, and at the near one, in the order they are trusted.
     ///
-    /// `GunFlash` first because it was right for all 147 it answered for; `BulletSpawnPoint` next
+    /// `GunFlash` first because it is right for all 147 it answers for; `BulletSpawnPoint` next
     /// at 148 of 149; `Point_Arm_Left` last at 149 of 151, and it is the only one a blade has.
     public static IReadOnlyList<(string Name, bool AtMuzzle)> Landmarks { get; } =
     [
@@ -34,13 +34,13 @@ public static class Facing
 
     /// How to stand this model up so it opens pointing the way every other one does.
     ///
-    /// The bounding box as before, turned a half circle about the vertical when the muzzle would
+    /// The renderer's own bounding box, turned a half circle about the vertical when the muzzle would
     /// otherwise be on the wrong side. A half circle rather than a mirror: negating one axis alone
     /// would reverse the model's handedness, and every texture with writing on it would read
     /// backwards.
     ///
     /// A model whose prefab carries none of the landmarks — six of the 157 — is left as the box
-    /// laid it, which is what every model did before this.
+    /// laid it.
     public static MeshRenderer.Basis Standing(
         BundleSet bundles, string bundle, UnityMesh mesh, long meshPathId)
     {
@@ -50,15 +50,15 @@ public static class Facing
 
         var centre = Centre(mesh);
 
-        // Where the screen's right actually is, asked of the view the preview opens at rather than
-        // assumed. The opening angle is measured against the game's own pictures and has moved once
-        // already; an assumption about it buried here would turn every weapon in the game round
-        // without anything saying so.
-        // Which way along the model's long axis the screen's right lies. Only the long axis is
-        // asked about, because the question is which *end* the barrel is on, and the turn that
-        // answers it is a half circle about the vertical — which negates this and nothing else.
-        // Projecting the whole offset instead lets the other two axes swing into the answer as the
-        // opening angle changes, and at this one they very nearly cancel it.
+        // Which way along the model's long axis the screen's right lies, asked of the view the
+        // preview opens at rather than assumed: the opening angle is measured against the game's
+        // own pictures and can change, and an assumption about it buried here would turn every
+        // weapon in the game round without anything saying so.
+        //
+        // Only the long axis is asked about, because the question is which *end* the barrel is on,
+        // and the turn that answers it is a half circle about the vertical — which negates this and
+        // nothing else. Projecting the whole offset instead lets the other two axes swing into the
+        // answer as the opening angle changes, and at this one they very nearly cancel it.
         var rightwards = MeshRenderer.View(new Camera()).Rx;
 
         foreach (var (name, atMuzzle) in Landmarks)

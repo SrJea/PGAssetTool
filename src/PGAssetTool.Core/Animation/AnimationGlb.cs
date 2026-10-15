@@ -186,8 +186,8 @@ public static partial class AnimationGlb
             }
 
             // Everything the clip leaves alone, held where the game has it. A Blender bone cannot
-            // keep a scale at rest, so one the game keeps at 0.95 stood at 1 in every action that
-            // did not say otherwise — and went back out at 1, as a curve the clip never had. Held
+            // keep a scale at rest, so one the game keeps at 0.95 stands at 1 in every action that
+            // does not say otherwise and goes back out at 1, as a curve the clip never had. Held
             // here, it stands where it should, and comes back holding still where it already
             // stands, which reading leaves out.
             var said = motion.Curves.Select(c => (c.Path, c.Channel)).ToHashSet();
@@ -688,7 +688,7 @@ public static partial class AnimationGlb
     /// Unity's curves are cubics through each key with a slope either side, which glTF can say
     /// exactly — and which Blender reads by keeping the keys and throwing the slopes away, putting
     /// handles of its own in their place. A weapon's motion is mostly its slopes, so what Blender
-    /// showed was not what the game plays, and what it wrote back was not what it had been given.
+    /// shows that way is not what the game plays, and what it writes back is not what it was given.
     /// Straight lines it reads as they are. Sampled on its own frames, and where Blender writes the
     /// animation back it samples on the same frames, so a curve nobody touched comes back as exactly
     /// the numbers it went out as — which is how reading it back knows to keep the game's own.

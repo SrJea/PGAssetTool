@@ -8,16 +8,16 @@ namespace PGAssetTool.Core.Assets;
 /// The library reads an LZ4 bundle a block at a time as bytes are asked for, and a reader asks for
 /// them all over the file: a name here, a transform's parent there, a material in between. Each
 /// jump to a block other than the one last read decodes that 128KB block again. Finding which way
-/// #16 faces walked 353 GameObjects and their parents and took 270ms; with the bundle already
-/// unpacked it took 13ms, and resolving a weapon went from about 110ms to about 10.
+/// #16 faces walks 353 GameObjects and their parents: 270ms read block by block, 13ms with the
+/// bundle already unpacked, and a weapon resolves in about 10ms against about 110.
 ///
 /// What it costs is memory: the bundle's full unpacked size for as long as the reader lives. The
 /// prefab bundles run 10 to 30MB unpacked, and the one every weapon's arms come from is 54MB; d_c_f is
-/// 216MB. So BundleSet unpacks only while a budget lasts, and reads the rest from disk as before.
+/// 216MB. So BundleSet unpacks only while a budget lasts, and reads the rest from disk block by block.
 public static class BundleUnpacker
 {
     /// The bundle, unpacked, or null for one that would come to more than <paramref name="most"/>
-    /// bytes or is compressed any way but LZ4 — the library is left to read those itself, as before.
+    /// bytes or is compressed any way but LZ4 — the library is left to read those itself.
     /// The file is closed again before this returns.
     public static MemoryStream? Unpack(string path, long most = long.MaxValue)
     {

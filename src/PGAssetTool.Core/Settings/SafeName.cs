@@ -3,15 +3,14 @@ namespace PGAssetTool.Core.Settings;
 /// A name from the game's data, or from an author, turned into one Windows will take.
 ///
 /// Filed here beside `AtomicFile` because it is the same kind of thing: how this tool deals with
-/// the file system rather than with the game. It was written four times before — for the files an
-/// export writes, for the folders a pack is filed under, for the pack's own name and for the folder
-/// a store keeps per installation — and each copy knew about a different way a name can be refused:
+/// the file system rather than with the game. One place for it, because four callers ask — the files
+/// an export writes, the folders a pack is filed under, the pack's own name, and the folder a store
+/// keeps per installation — and a name can be refused in more than one way:
 ///
-/// - A name that is **only** characters Windows will not take came back empty, and an empty name
+/// - A name that is **only** characters Windows will not take comes back empty, and an empty name
 ///   is a path that quietly means the folder above it.
-/// - A component ending in a **dot or a space** is not a name Windows will create. The exporter's
-///   copy did not know that, and it names directories as well as files — `related/<namespace>` is
-///   one of the game's own strings.
+/// - A component ending in a **dot or a space** is not a name Windows will create, and this names
+///   directories as well as files — `related/<namespace>` is one of the game's own strings.
 ///
 /// So: every character it will not take becomes an underscore, the ends are tidied, and a name left
 /// with nothing becomes whatever the caller would rather see.

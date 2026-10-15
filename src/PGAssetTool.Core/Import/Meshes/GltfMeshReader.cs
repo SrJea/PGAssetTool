@@ -34,9 +34,9 @@ public static class GltfMeshReader
         // Where each set of vertex accessors already went, so primitives that share one share it
         // here too. A Unity mesh is one vertex buffer with several index ranges over it, and that is
         // how this tool writes one out: every submesh names the same accessors. Read back a
-        // primitive at a time, each brought its own copy — #1200's Space Dessert, two submeshes over
-        // 2,779 vertices, went back into the game with 5,558, and every further round trip doubled
-        // it again. Blender writes a separate set per primitive, which comes through as before.
+        // primitive at a time, each brings its own copy — #1200's Space Dessert, two submeshes over
+        // 2,779 vertices, goes back into the game with 5,558, and every further round trip doubles
+        // it again. Blender writes a separate set per primitive, which comes through unchanged.
         var placed = new Dictionary<string, (int Base, int Count)>(StringComparer.Ordinal);
 
         foreach (var primitive in primitives)

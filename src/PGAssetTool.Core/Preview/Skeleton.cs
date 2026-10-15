@@ -104,8 +104,12 @@ public sealed class Skeleton
     /// no renderer on its object is a collider's geometry — `fps_all_terrain_vehicle_collider` says
     /// so in its name, #28 Tree calls its one `box`, and the pair of arms a few weapons carry under
     /// `FPS_PLAYER_Arm_left`/`_Right` are the same thing. The game draws none of them and nor should
-    /// a preview: they are the white slab in the middle of the model that was reported against #7,
-    /// #11, #14 and #28. A renderer switched off is not drawn either.
+    /// a preview: drawn, they are the white slab in the middle of #7, #11, #14 and #28. A renderer
+    /// switched off is not drawn either.
+    ///
+    /// Size is no guide to it. Measured over 618 items: of the 26 parts small enough to be a
+    /// marker, 21 are drawn by nothing and the other five are real — `avatar_agent_harn`'s eye, a
+    /// rover's glass — so the renderer is what answers.
     ///
     /// Asked of the parts drawn beside a model rather than of the model on the row, which is shown
     /// because somebody asked for it whatever draws it.
@@ -379,15 +383,14 @@ public sealed class Skeleton
     ///
     /// A skinned mesh is written in the space its bind poses map from, and what makes that the
     /// assembled model is every bone carrying the same skinning matrix at rest — which is what
-    /// nearly every weapon in this game does, and what drawing the mesh as it is written quietly
-    /// assumed. It is not true of all of them: measured over every weapon, **518 of 1517** have a
-    /// vertex further than a fiftieth of the model's own radius from where its bones put it, and
-    /// the worst of them throw a piece two thousand radii away, which is why one weapon in three
-    /// was drawn scattered and tiny — the far-flung pieces are in the bounding box that the framing
-    /// is worked out from.
+    /// nearly every weapon in this game does. It is not true of all of them: measured over every
+    /// weapon, **518 of 1517** have a vertex further than a fiftieth of the model's own radius from
+    /// where its bones put it, and the worst of them throw a piece two thousand radii away. Drawn
+    /// as written that is one weapon in three scattered and tiny, the far-flung pieces being inside
+    /// the bounding box the framing is worked out from.
     ///
-    /// Beretta_3_Mesh moves by 0.000 through this and adventure_swords_mesh by 0.012, so the
-    /// weapons that were already drawn right are drawn identically.
+    /// Beretta_3_Mesh moves by 0.000 through this and adventure_swords_mesh by 0.012, so a weapon
+    /// that needs none of it is drawn identically.
     ///
     /// Posing a clip starts from the mesh as it was written, never from this: the pose already
     /// carries the bones' own transforms, and starting here would apply them twice.
@@ -425,8 +428,8 @@ public sealed class Skeleton
 
         // A mesh carried by one bone per vertex has no weights at all — there is nothing to weigh
         // against — and that is how this game's weapons are rigged: the slide belongs to the slide's
-        // bone and to nothing else. Reading the missing channel as "no weight anywhere" left every
-        // vertex where it started, which looks exactly like an animation that does nothing.
+        // bone and to nothing else. Reading the missing channel as "no weight anywhere" leaves
+        // every vertex where it started, which looks exactly like an animation that does nothing.
         var weights = mesh.Get(VertexAttribute.BlendWeight);
         var wide = mesh.Dimensions.GetValueOrDefault(VertexAttribute.BlendIndices, 1);
 
@@ -520,15 +523,14 @@ public sealed class Skeleton
         return mesh with { Attributes = attributes };
     }
 
-    /// Every vertex and normal moved by the same matrix.
     /// The matrix that takes this skeleton's own space back into the space `mesh` was written in.
     ///
     /// It is what `Pose` applies when it is not asked for the prefab's space — the thing that makes
     /// a model at rest the model as it was read. Handed out because several meshes shown together
     /// have to be joined in the prefab's space, where they share one, and then taken back into the
     /// model's own: everything that reads a weapon's facing reads it there. `Facing.LandmarksIn`
-    /// answers in the model's space, and measured against a model in the prefab's the muzzle came
-    /// out at whichever end the two spaces happened to agree on.
+    /// answers in the model's space, and measured against a model in the prefab's the muzzle comes
+    /// out at whichever end the two spaces happen to agree on.
     public float[]? Home(UnityMesh mesh)
     {
         if (Bones.Count == 0 || Bones[0] >= Rest.Length) return null;
