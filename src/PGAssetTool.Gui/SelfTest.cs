@@ -2693,10 +2693,10 @@ internal static class SelfTest
 
             // Asked the way everything else asks, which answers null rather than throwing. The
             // version is read out of `globalgamemanagers` through the stock engine class database,
-            // and a Unity the database does not describe cannot be read at all: the game moved to
-            // Unity 6000.3 on 2026-10-15 and `PlayerSettings` stopped matching, so this check died
-            // on an EndOfStreamException while the tool itself carried on writing "unknown". What a
-            // pack says has to agree with what the tool knows, whatever that is.
+            // and `PlayerSettings` is the one class that does not always match what a built game
+            // writes: the game moved to Unity 6000.3 on 2026-10-15 and this check died on an
+            // EndOfStreamException while the tool itself carried on writing "unknown". What a pack
+            // says has to agree with what the tool knows, whatever that is.
             var live = GameVersion.Of(context, model.Game!) ?? Core.Pack.ForumPost.UnknownVersion;
 
             if (!lines[0].StartsWith(editor.PackName + " / ")) return $"the post opens '{lines[0]}'";

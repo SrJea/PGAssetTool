@@ -22,8 +22,8 @@ public static class ForumPost
     /// <param name="gameVersion">The game the author has in front of them, or null to fall back on
     /// the one the workspace was extracted from.</param>
     /// What a pack says of the game when the game will not say. Reading the version wants an
-    /// engine class database that describes the Unity the game was built with, and a game that
-    /// has moved to a newer one than the database knows cannot be read at all.
+    /// engine class database to describe `PlayerSettings` as the built game writes it, and that is
+    /// the one class it does not always get right.
     public const string UnknownVersion = "unknown";
 
     public static string For(
