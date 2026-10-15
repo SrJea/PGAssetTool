@@ -205,12 +205,12 @@ what the game plays it by, and its events call into the game's code.
 
 **A clip always keeps the length the game shipped it with.** The game times a weapon by its clips —
 how long a shot takes, how long a reload takes (`shotDelayForAnimation`, `GetReloadAnimationSpeed`
-in its metadata) — so another length is another fire rate: #2's 0.67s shot in #416's 2.60s one made
-#416 fire four times as often. That is a cheat whether meant or not. So `ClipImporter.Fit` stretches
-or squeezes whatever motion comes in to end where the game's clip ends — times scaled, slopes by the
-inverse, the same curve at another speed — and a legacy clip's length is its last key. It is done on
-the way into the bundle, so it holds for every pack, including ones built before it; the workspace
-is fitted too when an animation is put in, so the preview shows what the game will play.
+in its metadata) — so another length is another weapon, which reaches other players and is a cheat
+whether meant or not. So `ClipImporter.Fit` stretches or squeezes whatever motion comes in to end
+where the game's clip ends — times scaled, slopes by the inverse, the same curve at another speed —
+and a legacy clip's length is its last key. It is done on the way into the bundle, so it holds for
+every pack however it was built; the workspace is fitted too when an animation is put in, so the
+preview shows what the game will play.
 
 What goes in is one of two things.
 

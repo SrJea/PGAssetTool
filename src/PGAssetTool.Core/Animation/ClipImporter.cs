@@ -27,13 +27,12 @@ public sealed record ClipChange(int OldCurves, int NewCurves, float OldLength, f
 ///
 /// **And its length, always.** The game times a weapon by its clips — how long a shot takes, how long
 /// a reload takes (`shotDelayForAnimation`, `GetReloadAnimationSpeed`) — so a clip of another length
-/// changes how the weapon fights, not how it looks: #2's 0.67s shot in #416's 2.60s one made #416
-/// fire four times as often. That is a cheat whether anybody meant it or not, and an account can be
-/// banned for one. So whatever motion comes in is stretched or squeezed in time to end exactly where
-/// the game's own clip ends — keys moved, slopes rescaled so the curve between them is the same
-/// curve, only slower or faster — and a legacy clip's length is where its last key is, so the length
-/// the game reads is the one it shipped. This is done here, on the way into the bundle, so it holds
-/// for every pack: one built before this, one edited by hand, one from anywhere.
+/// changes how the weapon fights rather than how it looks. That reaches other players, and it is a
+/// cheat whether anybody meant it or not, which an account can be banned for. So whatever motion
+/// comes in is stretched or squeezed in time to end exactly where the game's own clip ends — keys
+/// moved, slopes rescaled so the curve between them is the same curve, only slower or faster — and
+/// a legacy clip's length is where its last key is, so the length the game reads is the one it
+/// shipped. Done here, on the way into the bundle, so it holds for every pack however it was built.
 ///
 /// A clip the game saved compressed keeps its rotations packed in bits; those are cleared, since the
 /// replacement's are written plain and two sets of rotations for one bone would fight. Unity plays a
