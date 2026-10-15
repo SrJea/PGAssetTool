@@ -172,8 +172,16 @@ if (command == "info")
     }
     else Console.WriteLine("Downloaded none yet; everything loads from the shipped cache");
     Console.WriteLine($"Data files {game.EnumerateSerializedFiles().Count()}");
-    Console.WriteLine($"Version    {GameVersion.Of(bundles.Context, game)
-        ?? $"unavailable ({ClassPackage.FileName} not found)"}");
+    // Two different kinds of nothing, and saying the wrong one sends somebody looking for a file
+    // that is already there. The version lives in `globalgamemanagers`, which carries no type tree,
+    // so it is read through the stock engine class database — and `PlayerSettings` is the one class
+    // that database does not always describe as a built game writes it. Measured against the game
+    // on Unity 6000.3.14f1: 18 of the 19 objects in `globalgamemanagers` read, and 400 of 400 in
+    // `globalgamemanagers.assets`; `PlayerSettings` alone runs off the end of its 908 bytes.
+    Console.WriteLine($"Version    {GameVersion.Of(bundles.Context, game) ?? (bundles.Context.HasClassDatabase
+        ? "unavailable (this game's PlayerSettings is not laid out as the engine class database has it)"
+        : $"unavailable ({ClassPackage.FileName} not found)")}");
+    Console.WriteLine($"Tool data  {new ModStore(game).Home}");
     return 0;
 }
 

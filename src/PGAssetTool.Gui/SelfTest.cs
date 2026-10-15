@@ -2531,7 +2531,14 @@ internal static class SelfTest
             var edited = editor.Files.Count(f => f.Edited && f.Operation == Core.Pack.PackOperations.ReplaceTexture);
             var lines = post.Split('\n');
             using var context = new AssetsContext();
-            var live = GameVersion.Read(context, model.Game!);
+
+            // Asked the way everything else asks, which answers null rather than throwing. The
+            // version is read out of `globalgamemanagers` through the stock engine class database,
+            // and `PlayerSettings` is the one class that does not always match what a built game
+            // writes: the game moved to Unity 6000.3 on 2026-10-15 and this check died on an
+            // EndOfStreamException while the tool itself carried on writing "unknown". What a pack
+            // says has to agree with what the tool knows, whatever that is.
+            var live = GameVersion.Of(context, model.Game!) ?? Core.Pack.ForumPost.UnknownVersion;
 
             if (!lines[0].StartsWith(editor.PackName + " / ")) return $"the post opens '{lines[0]}'";
             if (!lines.Contains("Typed and not saved.")) return "the post did not take the description as typed";
