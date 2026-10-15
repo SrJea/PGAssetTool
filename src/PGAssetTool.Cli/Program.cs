@@ -380,8 +380,14 @@ static int Info(GameInstallation game, BundleSet bundles)
     }
     else Console.WriteLine("Downloaded none yet; everything loads from the shipped cache");
     Console.WriteLine($"Data files {game.EnumerateSerializedFiles().Count()}");
-    Console.WriteLine($"Version    {GameVersion.Of(bundles.Context, game)
-        ?? $"unavailable ({ClassPackage.FileName} not found)"}");
+    // Two different kinds of nothing, and saying the wrong one sends somebody looking for a file
+    // that is already there. The version lives in `globalgamemanagers`, which carries no type tree,
+    // so it is read through the stock engine class database — and a game built with a Unity that
+    // database does not describe cannot be read however present the file is. That is what happened
+    // when the game moved to Unity 6000.3.
+    Console.WriteLine($"Version    {GameVersion.Of(bundles.Context, game) ?? (bundles.Context.HasClassDatabase
+        ? "unavailable (this game's Unity is newer than the engine class database describes)"
+        : $"unavailable ({ClassPackage.FileName} not found)")}");
     Console.WriteLine($"Tool data  {new ModStore(game).Home}");
     return 0;
 }

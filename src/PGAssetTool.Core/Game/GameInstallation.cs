@@ -84,6 +84,34 @@ public sealed class GameInstallation
     /// </exception>
     public IReadOnlyList<BundleEntry> ReadManifest()
     {
+        var shipped = ReadShippedManifest();
+        if (Downloaded is null) return shipped;
+
+        // And everything the downloaded cache claims that the shipped manifest does not name.
+        //
+        // **The two are not the same list and the shipped one is not the longer.** The game updated
+        // on 2026-10-15 and moved most of its bundles into the player's profile: 90 names were left
+        // in `embedded_asset_bundles.json` and 816 are claimed in `Cache/Info/names`. Resolving a
+        // bundle already preferred the downloaded copy, but every list of what the game *has* came
+        // from the shipped manifest alone — so eight hundred bundles were simply not there, and
+        // anything in one answered "'bhlw' is not in the bundle manifest".
+        //
+        // The shipped entry wins where both name a bundle, since that hash is the one the game
+        // recorded for it; the downloaded cache's own hash is in the path `Resolve` returns.
+        var named = shipped.Select(e => e.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        return
+        [
+            .. shipped,
+            .. Downloaded.Claimed
+                .Where(claim => !named.Contains(claim.Key))
+                .OrderBy(claim => claim.Key, StringComparer.OrdinalIgnoreCase)
+                .Select(claim => new BundleEntry(claim.Key, claim.Value)),
+        ];
+    }
+
+    private IReadOnlyList<BundleEntry> ReadShippedManifest()
+    {
         try
         {
             using var stream = File.OpenRead(ManifestPath);
