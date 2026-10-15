@@ -59,6 +59,10 @@ public sealed class AssetsContext : IDisposable
     public AssetTypeValueField? Deserialize(AssetsFileInstance file, AssetFileInfo info)
         => _manager.GetBaseField(file, info);
 
+    /// The shape an object of this class has, without reading one.
+    public AssetTypeTemplateField GetTemplate(AssetsFileInstance file, AssetFileInfo info)
+        => _manager.GetTemplateBaseField(file, info);
+
     /// What an object is called, as `AssetNaming.NameOf` would read it off the whole object.
     ///
     /// Most classes keep `m_Name` as their first field, and for those the name is read straight off
@@ -212,11 +216,55 @@ public static class GameVersion
 {
     /// PlayerSettings.bundleVersion, e.g. "26.11.0". The game never downgrades, so a change in this
     /// value is a reliable update signal.
+    /// `PlayerSettings` is read as far as this field and no further, and the field after it is
+    /// looked at as a string.
+    ///
+    /// The class is one the stock engine class database does not describe as a built game writes
+    /// it. Read whole against the game on Unity 6000.3.14f1, it runs off the end of its 908 bytes
+    /// at field 150 of 175 — so nothing in `globalgamemanagers` could be read at all, though 400 of
+    /// 400 objects in `globalgamemanagers.assets` can. The fields up to `bundleVersion`, field 136,
+    /// do line up: `companyName` and `productName` come out right.
+    ///
+    /// The build carries one string there that the database does not list, so what the database
+    /// calls `bundleVersion` is the field before the real one — '1.0' where the game shows
+    /// '26.13.0'. The extra string is taken only when it reads as a version and the one the
+    /// template named does not look later than it, which is what makes this safe where the two do
+    /// agree: the next field is then `preloadedAssets`, a vector whose count reads as a string
+    /// length of nothing plausible.
+    private const string VersionField = "bundleVersion";
+
     public static string Read(AssetsContext context, GameInstallation game)
     {
         var ggm = context.OpenSerializedFile(game.GlobalGameManagersPath);
         var info = ggm.file.AssetInfos.First(a => a.TypeId == (int)AssetClassID.PlayerSettings);
-        return context.Deserialize(ggm, info)!["bundleVersion"].AsString;
+
+        var template = context.GetTemplate(ggm, info);
+        var at = template.Children.FindIndex(c => c.Name == VersionField);
+        if (at < 0) return context.Deserialize(ggm, info)![VersionField].AsString;
+
+        template.Children = [.. template.Children.Take(at + 1)];
+
+        var reader = ggm.file.Reader;
+        reader.Position = info.GetAbsoluteByteOffset(ggm.file);
+        var named = template.MakeValue(reader)[VersionField].AsString;
+
+        return NextVersion(reader, info.GetAbsoluteByteOffset(ggm.file) + info.ByteSize) ?? named;
+    }
+
+    /// The next length-prefixed string, when it is a run of digits and dots and nothing longer than
+    /// a version is. Null for anything else, which is how a field that is not a string says so.
+    private static string? NextVersion(AssetsFileReader reader, long end)
+    {
+        if (reader.Position + 4 > end) return null;
+
+        var length = reader.ReadInt32();
+        if (length is < 3 or > 32 || reader.Position + length > end) return null;
+
+        var text = System.Text.Encoding.UTF8.GetString(reader.ReadBytes(length));
+        return text.Length > 0 && text.All(c => char.IsAsciiDigit(c) || c == '.')
+            && char.IsAsciiDigit(text[0]) && text.Contains('.')
+                ? text
+                : null;
     }
 
     /// The version if it can be read, and null if it cannot.
