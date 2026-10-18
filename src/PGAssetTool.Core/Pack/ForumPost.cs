@@ -21,6 +21,11 @@ public static class ForumPost
     /// per file, so a picture written to both default looks counts once.</param>
     /// <param name="gameVersion">The game the author has in front of them, or null to fall back on
     /// the one the workspace was extracted from.</param>
+    /// What a pack says of the game when the game will not say. Reading the version wants an
+    /// engine class database to describe `PlayerSettings` as the built game writes it, and that is
+    /// the one class it does not always get right.
+    public const string UnknownVersion = "unknown";
+
     public static string For(
         PackManifest manifest, IEnumerable<string> changed, string? gameVersion, string toolVersion)
     {
@@ -38,7 +43,7 @@ public static class ForumPost
             lines.Add("Skin: " + (subject.Variant.Length == 0 ? "Default" : subject.DescribeVariant));
 
         lines.Add("Changes: " + Changes(changed));
-        lines.Add("GameVersion: " + (gameVersion ?? manifest.BuiltAgainstGameVersion ?? "unknown"));
+        lines.Add("GameVersion: " + (gameVersion ?? manifest.BuiltAgainstGameVersion ?? UnknownVersion));
         lines.Add("ToolVersion: " + toolVersion);
 
         return string.Join("\n", lines);
@@ -67,5 +72,5 @@ public static class ForumPost
     public static string ToolVersion =>
         typeof(ForumPost).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()
             ?.InformationalVersion.Split('+')[0]
-        ?? "unknown";
+        ?? UnknownVersion;
 }
