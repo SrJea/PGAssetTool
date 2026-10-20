@@ -98,6 +98,98 @@ public sealed class Skeleton
         return Unskinned(bundles, file, meshPathId, whole);
     }
 
+    /// One place a mesh is drawn: the renderer that draws it there, as a skeleton, and the name of
+    /// every object it hangs under, its own first and the top of the hierarchy last.
+    ///
+    /// The names are what tells one placement from another, and every caller asks something
+    /// different of them — which hierarchy this is, whether the game draws this copy as an outline
+    /// shell — so what is handed over is where it hangs rather than a verdict about it.
+    public sealed record Placement(Skeleton Skeleton, IReadOnlyList<string> Under)
+    {
+        /// The top of the hierarchy: the prefab this placement belongs to.
+        public string Root => Under.Count > 0 ? Under[^1] : "";
+    }
+
+    /// Every place a mesh is drawn, in the order the file holds them.
+    ///
+    /// The game draws one copy of a mesh per renderer that names it, and a prefab puts the same mesh
+    /// down more than once: a transport's wheels are one 72-vertex mesh placed ten times, and 82 of
+    /// the 90 transports place something more than once — up to twenty times on
+    /// `fps_all_terrain_vehicle`. <see cref="For"/> answers one of them, which is one wheel.
+    ///
+    /// `Root` is what tells one arrangement from another, and a caller takes the placements of one
+    /// root rather than all of them: the same parts appear again under the `<item>_shop` prefab,
+    /// arranged its own way, so drawing every placement there is draws each wheel twice, in two
+    /// different places.
+    public static IReadOnlyList<Placement> Every(
+        BundleSet bundles, string bundle, long meshPathId, bool whole = false)
+    {
+        if (Opened(bundles, bundle) is not { } file) return [];
+
+        var placements = new List<Placement>();
+
+        foreach (var (skinned, renderer, mine) in Renderers(bundles, file, meshPathId))
+        {
+            Skeleton? skeleton;
+            if (skinned)
+            {
+                var bones = renderer["m_Bones"]["Array"].Children
+                    .Select(b => b["m_PathID"].AsLong)
+                    .Where(id => id != 0)
+                    .ToList();
+                if (bones.Count == 0) continue;
+
+                skeleton = Build(bundles, file, bones, mine, whole: whole);
+            }
+            else skeleton = Build(bundles, file, [mine], mine, rigid: true, whole: whole);
+
+            if (skeleton is null) continue;
+
+            placements.Add(new Placement(skeleton, Ancestry(bundles, file, mine)));
+        }
+
+        return placements;
+    }
+
+    /// Where each copy of a mesh hangs, as <see cref="Placement.Under"/> and nothing else.
+    ///
+    /// The same scan without the rigs, for a caller deciding which hierarchy it wants before paying
+    /// for them: a transport's parts come to twenty placements and a rig read whole is most of what
+    /// a placement costs.
+    public static IReadOnlyList<IReadOnlyList<string>> Placings(
+        BundleSet bundles, string bundle, long meshPathId)
+    {
+        if (Opened(bundles, bundle) is not { } file) return [];
+
+        return [.. Renderers(bundles, file, meshPathId).Select(r => Ancestry(bundles, file, r.Transform))];
+    }
+
+    private static AssetsFileInstance? Opened(BundleSet bundles, string bundle)
+    {
+        try { return bundles.Open(bundle); }
+        catch (Exception e) when (e is IOException or FileNotFoundException) { return null; }
+    }
+
+    /// Every renderer in a bundle that names this mesh, with the transform it hangs off.
+    private static IEnumerable<(bool Skinned, AssetTypeValueField Renderer, long Transform)> Renderers(
+        BundleSet bundles, AssetsFileInstance file, long meshPathId)
+    {
+        foreach (var info in file.file.AssetInfos)
+        {
+            var skinned = info.TypeId == (int)AssetClassID.SkinnedMeshRenderer;
+            if (!skinned && info.TypeId != (int)AssetClassID.MeshFilter) continue;
+
+            var field = bundles.Context.Deserialize(file, info);
+            if (field is null || field["m_Mesh"]["m_PathID"].AsLong != meshPathId) continue;
+
+            var owner = field["m_GameObject"];
+            if (owner.IsDummy) continue;
+
+            var mine = TransformOf(bundles, file, owner["m_PathID"].AsLong);
+            if (mine != 0) yield return (skinned, field, mine);
+        }
+    }
+
     /// Whether the game draws this mesh at all.
     ///
     /// **A MeshFilter says which mesh; a MeshRenderer beside it is what draws one.** A filter with
@@ -177,35 +269,37 @@ public sealed class Skeleton
     }
 
     /// Whether this object hangs somewhere under one of the given name.
+    private static bool Beneath(
+        BundleSet bundles, AssetsFileInstance file, AssetTypeValueField owner, string root)
+        => !owner.IsDummy
+            && Ancestry(bundles, file, TransformOf(bundles, file, owner["m_PathID"].AsLong))
+                .Any(n => string.Equals(n, root, StringComparison.OrdinalIgnoreCase));
+
+    /// The names of this transform's own object and of every object above it, the top last.
     ///
     /// Walked up rather than down: an object has one parent and a root has hundreds of descendants,
     /// and the chain from a weapon's mesh to its prefab root is a handful of steps. The count is a
     /// guard against a hierarchy that points at itself, which a bundle this tool did not write
     /// could hold.
-    private static bool Beneath(
-        BundleSet bundles, AssetsFileInstance file, AssetTypeValueField owner, string root)
+    private static List<string> Ancestry(BundleSet bundles, AssetsFileInstance file, long transform)
     {
-        if (owner.IsDummy) return false;
-
-        var transform = TransformOf(bundles, file, owner["m_PathID"].AsLong);
+        var names = new List<string>();
 
         for (var step = 0; transform != 0 && step < 64; step++)
         {
             var info = file.file.GetAssetInfo(transform);
             var field = info is null ? null : bundles.Context.Deserialize(file, info);
-            if (field is null) return false;
+            if (field is null) break;
 
             var holder = field["m_GameObject"];
-            if (!holder.IsDummy
-                && file.file.GetAssetInfo(holder["m_PathID"].AsLong) is { } named
-                && string.Equals(bundles.Context.NameOf(file, named), root, StringComparison.OrdinalIgnoreCase))
-                return true;
+            if (!holder.IsDummy && file.file.GetAssetInfo(holder["m_PathID"].AsLong) is { } named)
+                names.Add(bundles.Context.NameOf(file, named));
 
             var father = field["m_Father"];
             transform = father.IsDummy ? 0 : father["m_PathID"].AsLong;
         }
 
-        return false;
+        return names;
     }
 
     private static long TransformOf(BundleSet bundles, AssetsFileInstance file, long gameObject)

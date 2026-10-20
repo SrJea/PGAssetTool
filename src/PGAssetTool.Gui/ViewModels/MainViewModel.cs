@@ -1115,6 +1115,89 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private string? PrefabRoot
         => _tree?.PrefabPath is { Length: > 0 } path ? path[(path.LastIndexOf('/') + 1)..] : null;
 
+    /// Everywhere this item draws a mesh, which is once per renderer that names it.
+    ///
+    /// **The placements under the item's own prefab root, wherever it has any.** A `_shop` or
+    /// `_info` root holds the same parts arranged its own way, so taking every placement there is
+    /// draws each part twice, in two places.
+    ///
+    /// **And where it has none, every placement that is not somebody else's.** An item's prefab and
+    /// the model it is built from are not always one hierarchy: `avatar_bronze_hero` names no
+    /// renderer at all, its head, body, legs and arms hanging under `avatar_lvl_65_hero`, which is
+    /// itself an item — the level-65 hero the bronze, silver and gold tiers are built on. An item
+    /// that has a hierarchy of its own and still reaches into another's is reaching through the
+    /// closure rather than wearing what it finds: `mask_medical_mask` reaches
+    /// `mask_doctor_plague_mesh`, and a medical mask is not worn with a plague doctor's. An item
+    /// with no hierarchy of its own has nothing else to be, so whatever it reaches is what it is.
+    ///
+    /// Measured over every item: 214 parts are drawn that were not, and two are left out — the
+    /// plague doctor's mask above, and one weapon reaching another's mesh the same way.
+    private List<Skeleton.Placement> Places(AssetNode mesh, string bundle, bool hasOwn)
+    {
+        var places = Skeleton.Every(_bundles!, bundle, mesh.PathId, whole: true)
+            .Where(p => !Outlined(p.Under) && !Copy(p.Root))
+            .ToList();
+
+        var own = places
+            .Where(p => string.Equals(p.Root, PrefabRoot, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        return own.Count > 0
+            ? own
+            : [.. places.Where(p => !hasOwn || !Somebody(p.Root))];
+    }
+
+    /// Whether any of this item's meshes is placed under the item's own prefab root.
+    ///
+    /// Asked of the names alone, before any rig is read: a transport comes to twenty placements and
+    /// reading the rig is most of what one costs. See Skeleton.Placings.
+    private bool HasOwnHierarchy(IReadOnlyList<AssetNode> meshes, string prefabBundle)
+        => PrefabRoot is { } root && meshes.Any(mesh => Skeleton
+            .Placings(_bundles!, mesh.Bundle.Length > 0 ? mesh.Bundle : prefabBundle, mesh.PathId)
+            .Any(under => !Outlined(under)
+                && under.Count > 0
+                && string.Equals(under[^1], root, StringComparison.OrdinalIgnoreCase)));
+
+    /// A prefab holding the game's own second arrangement of an item: the shop's, and the one the
+    /// preview in a weapon's info panel uses.
+    private static bool Copy(string root)
+        => root.Length == 0
+            || root.EndsWith("_shop", StringComparison.OrdinalIgnoreCase)
+            || root.EndsWith("_info", StringComparison.OrdinalIgnoreCase);
+
+    /// Whether a root is another item's prefab rather than this one's.
+    private bool Somebody(string root)
+        => _tree?.Record is { } record
+            && !string.Equals(root, record.PrefabName, StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(root, record.Slug, StringComparison.OrdinalIgnoreCase)
+            && ItemNames().Contains(root);
+
+    /// Every name the game files an item under, kept per reading of the catalogues.
+    private (GameCatalogs? Of, IReadOnlySet<string>? Names) _itemNames;
+
+    private IReadOnlySet<string> ItemNames()
+    {
+        if (ReferenceEquals(_itemNames.Of, _catalogs) && _itemNames.Names is { } known) return known;
+
+        IReadOnlySet<string> names = _catalogs is not { } catalogs
+            ? new HashSet<string>()
+            : new HashSet<string>(
+                catalogs.Kinds.SelectMany(catalogs.Of).SelectMany(r => new[] { r.PrefabName, r.Slug }),
+                StringComparer.OrdinalIgnoreCase);
+
+        _itemNames = (_catalogs, names);
+        return names;
+    }
+
+    /// Whether the game draws this copy of a mesh as the cel-shaded outline behind the model.
+    ///
+    /// An outline is a second placement of the same mesh under a `_outline` object, turned inside
+    /// out by its own transform. Drawn as a surface it covers the model: `avatar_cube_the_greatest`
+    /// carries one per head decoration, which is 74 parts where the avatar has 39.
+    private static bool Outlined(IReadOnlyList<string> under)
+        => under.Any(n => n.EndsWith("_outline", StringComparison.OrdinalIgnoreCase)
+            || n.Equals("outline", StringComparison.OrdinalIgnoreCase));
+
     /// The rest of the prefab, to be drawn with the mesh on this row.
     ///
     /// **Most of what this finds is the item itself, not something it is held in.** Measured over
@@ -1141,11 +1224,14 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         var wearing = new List<PreviewImage?>();
         if (_tree?.PrefabBundle is not { } prefabBundle) return (with, wearing);
 
-        foreach (var other in _tree.PrefabAssets.Where(a => a.Class == AssetClassID.Mesh))
-        {
-            if (other.PathId == node.PathId) continue;
-            if (other.Name.StartsWith("vfx=", StringComparison.OrdinalIgnoreCase)) continue;
+        var meshes = _tree.PrefabAssets
+            .Where(a => a.Class == AssetClassID.Mesh
+                && !a.Name.StartsWith("vfx=", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        var hasOwn = HasOwnHierarchy(meshes, prefabBundle);
 
+        foreach (var other in meshes)
+        {
             var arms = AreArms(other.Name);
             if (arms && !ShowArms) continue;
 
@@ -1159,13 +1245,13 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                 if (field is null || UnityMesh.Read(field) is not { VertexCount: > 0 } mesh) continue;
                 if (!Skeleton.Drawn(_bundles, bundle, other.PathId)) continue;
 
-                // Under this item's own prefab, and only there. A bundle holds many items and
-                // their meshes are all reachable: `cape_cloak_of_night` was being shown wearing
-                // `cape_vaneuvering_module_mesh`, another cape entirely, because nothing said
-                // whose hierarchy it was in. The model on the row is the one exception — it is
-                // shown because somebody asked for it, wherever it turns out to hang.
-                if (PrefabRoot is not { } root) continue;
-                if (Skeleton.For(_bundles, bundle, other.PathId, root, whole: true) is not { } bones) continue;
+                // Every place the item puts this mesh, less the first of the mesh on the row: that
+                // one is the model being shown, drawn by the preview itself. A wheel selected out
+                // of the ten a transport places is still the other nine, which is why the row's
+                // mesh is here at all rather than skipped.
+                var places = Places(other, bundle, hasOwn);
+                if (other.PathId == node.PathId) places = [.. places.Skip(1)];
+                if (places.Count == 0) continue;
 
                 // Dressed, or named after the item and so one of its own. See IsDecoration.
                 var pictures = TexturesFor(_tree.MeshTextures
@@ -1173,9 +1259,12 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                 if (pictures?.Any(p => p is not null) != true
                     && IsDecoration(other.Name, _tree.Record.Slug)) continue;
 
-                with.Add((mesh, bones, !arms));
-                wearing.AddRange(pictures
-                    ?? Enumerable.Repeat((PreviewImage?)null, Math.Max(mesh.SubMeshes.Count, 1)));
+                foreach (var place in places)
+                {
+                    with.Add((mesh, place.Skeleton, !arms));
+                    wearing.AddRange(pictures
+                        ?? Enumerable.Repeat((PreviewImage?)null, Math.Max(mesh.SubMeshes.Count, 1)));
+                }
             }
             catch (Exception)
             {

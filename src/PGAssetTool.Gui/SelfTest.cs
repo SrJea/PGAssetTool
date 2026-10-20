@@ -1,4 +1,4 @@
-using AssetsTools.NET.Extra;
+﻿using AssetsTools.NET.Extra;
 using Avalonia;
 using Avalonia.Headless;
 using Avalonia.VisualTree;
@@ -987,6 +987,7 @@ internal static class SelfTest
             if (AnOutlineIsLeftOutWhicheverShapeItTakes(model) is { } shellProblem) return Fail(shellProblem);
             if (AWeaponIsShownInTheArmsThatHoldIt(model) is { } armsProblem) return Fail(armsProblem);
             if (AnItemIsPreviewedWhole(model) is { } wholeProblem) return Fail(wholeProblem);
+            if (PartsAreDrawnWhereTheGamePutsThem(model) is { } placedProblem) return Fail(placedProblem);
             if (AClipIsGivenRoomToMoveIn(model) is { } roomProblem) return Fail(roomProblem);
             if (AnotherKindGoesTheWholeWay(model, model.WorkspaceRoot) is { } otherKind) return Fail(otherKind);
 
@@ -2776,6 +2777,103 @@ internal static class SelfTest
     /// mesh rows of one avatar show the same model**, since each of them is a part of the same whole.
     ///
     /// With the arms off, because they are the other question and this one is not about them.
+    /// A part the item puts down more than once is drawn that many times, and an item whose model
+    /// is not under its own prefab is still drawn whole.
+    ///
+    /// Two shapes the game uses that one answer per mesh asset cannot show. A transport places one
+    /// wheel mesh ten times — 82 of the 90 of them place something more than once — so what is
+    /// drawn has to come to more than the sum of the item's distinct meshes. And an avatar's tier
+    /// shares a model: Bronze Hero's four parts hang under `avatar_lvl_65_hero`, which is not its
+    /// prefab's name, so asking for the prefab's name answers nothing and shows one mesh.
+    private static string? PartsAreDrawnWhereTheGamePutsThem(MainViewModel model)
+    {
+        var was = model.ShowArms;
+        var kind = model.Kind;
+
+        try
+        {
+            model.ShowArms = false;
+
+            if (!Select(model, Core.Catalog.ItemKinds.Transport, "royale_car_all_terrain_tank"))
+                return "the all-terrain tank could not be selected";
+            if (model.Detail is not { Tree: { } tank } tankDetail) return "selecting the tank left no tree";
+
+            var distinct = 0;
+            foreach (var mesh in tank.PrefabAssets.Where(a => a.Class == AssetClassID.Mesh))
+                if (MeshOf(model, tank, mesh) is { } read) distinct += read.VertexCount;
+
+            var wheels = Rows(tankDetail.Roots)
+                .FirstOrDefault(n => n.Class == AssetClassID.Mesh
+                    && n.Label.Contains("wheel", StringComparison.OrdinalIgnoreCase));
+            if (wheels is null) return "the tank lists no wheel to select";
+
+            tankDetail.SelectedNode = wheels;
+            if (!Arrived(model, wheels)) return $"'{wheels.Label}' never reached the preview";
+            if (model.Preview.Rest is not { } drawn) return $"'{wheels.Label}' showed no model";
+
+            Console.WriteLine($"placed   the tank is drawn with {drawn.VertexCount} vertices "
+                + $"against {distinct} in its distinct meshes");
+            if (drawn.VertexCount <= distinct)
+                return $"the tank is drawn with {drawn.VertexCount} vertices and its distinct meshes come "
+                    + $"to {distinct}: a wheel it places ten times is being drawn once";
+
+            if (!Select(model, Core.Catalog.ItemKinds.Avatar, "avatar_bronze_hero"))
+                return "'avatar_bronze_hero' could not be selected";
+            if (model.Detail is not { Tree: { } hero } heroDetail) return "selecting the avatar left no tree";
+
+            var parts = 0;
+            foreach (var mesh in hero.PrefabAssets.Where(a => a.Class == AssetClassID.Mesh))
+                if (MeshOf(model, hero, mesh) is { } read) parts += read.VertexCount;
+
+            var row = Rows(heroDetail.Roots).FirstOrDefault(n => n.Class == AssetClassID.Mesh);
+            if (row is null) return "Bronze Hero lists no mesh to select";
+
+            heroDetail.SelectedNode = row;
+            if (!Arrived(model, row)) return $"'{row.Label}' never reached the preview";
+            if (model.Preview.Rest is not { } whole) return $"'{row.Label}' showed no model";
+
+            Console.WriteLine($"placed   Bronze Hero is drawn with {whole.VertexCount} vertices "
+                + $"against {parts} in the four parts it is made of");
+            if (whole.VertexCount != parts)
+                return $"Bronze Hero is drawn with {whole.VertexCount} vertices and its parts come to "
+                    + $"{parts}: its model hangs under a name its prefab does not have, and the parts "
+                    + "are being left out";
+
+            return null;
+        }
+        finally
+        {
+            model.ShowArms = was;
+            if (model.Kind != kind)
+            {
+                model.Kind = kind;
+                WaitWhile(() => model.Weapons.Count == 0, 60_000);
+            }
+        }
+    }
+
+    /// One of an item's meshes as the preview reads it, or null for one that will not read.
+    private static Core.Export.Meshes.UnityMesh? MeshOf(
+        MainViewModel model, Core.Weapons.WeaponTree tree, Core.Assets.AssetNode mesh)
+    {
+        var bundle = mesh.Bundle.Length > 0 ? mesh.Bundle : tree.PrefabBundle;
+        if (bundle is null || model.Reader is not { } bundles) return null;
+        if (!Core.Preview.Skeleton.Drawn(bundles, bundle, mesh.PathId)) return null;
+        if (mesh.Name.StartsWith("vfx=", StringComparison.OrdinalIgnoreCase)) return null;
+
+        try
+        {
+            if (Core.Preview.AssetPreview.Locate(bundles, bundle, AssetClassID.Mesh, mesh.PathId, mesh.Name)
+                is not var (file, info)) return null;
+            var field = bundles.Context.Deserialize(file, info);
+            return field is null ? null : Core.Export.Meshes.UnityMesh.Read(field);
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
     private static string? AnItemIsPreviewedWhole(MainViewModel model)
     {
         var was = model.ShowArms;
