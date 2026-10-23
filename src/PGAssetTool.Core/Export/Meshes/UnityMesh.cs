@@ -74,16 +74,112 @@ public sealed record UnityMesh
 
     public float[]? Get(VertexAttribute attribute) => Attributes.GetValueOrDefault(attribute);
 
+    /// Several meshes of one prefab as one mesh, for showing them together.
+    ///
+    /// A weapon in this game is not only the weapon: `Arms_Mesh` is in 398 of 400 prefabs, and the
+    /// clips move it — 1,437 of 1,523 weapons animate an arm that actually moves. The renderer draws
+    /// one mesh into one depth buffer, so showing the pair means one mesh.
+    ///
+    /// **The parts must already be posed** (`Skeleton.Assembled`, from a skeleton read with the
+    /// whole prefab, so that both are in the prefab's own space). What comes back is therefore for
+    /// looking at and not for writing back: the skinning is dropped rather than carried, because
+    /// blend indices count against a bone list that is per mesh and means nothing once two are
+    /// joined. Nothing exports this.
+    ///
+    /// Each part keeps its own submeshes, in order, so a texture per submesh still lands where it
+    /// belongs. `BaseVertex` is folded into the indices here — the renderer does not add it, the glb
+    /// writer does — so the result needs it from nobody.
+    ///
+    /// A part that carries an outline shell comes too. Whether to cull by facing is a property of a
+    /// whole mesh and is lost in the join — a shell that fills its own part's box does not fill the
+    /// whole item's — so the caller works it out from the parts and tells the renderer.
+    /// `avatar_bugged_cosmus` is why: its body, head and legs each carry one, and left out there is
+    /// nothing of it to see but the arms.
+    public static UnityMesh? Combined(string name, IReadOnlyList<UnityMesh> parts)
+    {
+        if (parts.Count == 0) return null;
+        if (parts.Count == 1) return parts[0];
+
+        var dimensions = new Dictionary<VertexAttribute, int>();
+        foreach (var part in parts)
+            foreach (var (attribute, width) in part.Dimensions)
+                dimensions.TryAdd(attribute, width);
+
+        // Position is what everything downstream indexes three at a time; a part without one has
+        // no geometry to contribute and would only shift every index after it.
+        if (!dimensions.ContainsKey(VertexAttribute.Position)) return null;
+
+        var total = parts.Sum(p => p.VertexCount);
+        var attributes = dimensions.ToDictionary(d => d.Key, d => new float[total * d.Value]);
+        var indices = new List<int>();
+        var subMeshes = new List<SubMesh>();
+        var vertexBase = 0;
+
+        foreach (var part in parts)
+        {
+            foreach (var (attribute, width) in dimensions)
+            {
+                var into = attributes[attribute];
+                var from = part.Get(attribute);
+                if (from is null) continue;
+
+                // A part may carry fewer components than another — the last UV set is four wide on
+                // 378 of the game's meshes and two on the rest. Copy what there is and leave the
+                // rest at zero, rather than reading off the end of the shorter one.
+                var mine = part.Dimensions.GetValueOrDefault(attribute, width);
+                var copy = Math.Min(mine, width);
+
+                for (var vertex = 0; vertex < part.VertexCount; vertex++)
+                for (var component = 0; component < copy; component++)
+                {
+                    var source = vertex * mine + component;
+                    if (source < from.Length)
+                        into[(vertexBase + vertex) * width + component] = from[source];
+                }
+            }
+
+            var own = part.SubMeshes.Count > 0
+                ? part.SubMeshes
+                : [new SubMesh(0, part.Indices.Length, 0, 0)];
+
+            foreach (var sub in own)
+            {
+                var start = indices.Count;
+                for (var i = 0; i < sub.IndexCount; i++)
+                {
+                    var at = sub.IndexStart + i;
+                    if (at >= 0 && at < part.Indices.Length)
+                        indices.Add(part.Indices[at] + sub.BaseVertex + vertexBase);
+                }
+
+                subMeshes.Add(new SubMesh(start, indices.Count - start, sub.Topology, BaseVertex: 0));
+            }
+
+            vertexBase += part.VertexCount;
+        }
+
+        return new UnityMesh
+        {
+            Name = name,
+            VertexCount = total,
+            Attributes = attributes,
+            Dimensions = dimensions,
+            Indices = [.. indices],
+            SubMeshes = subMeshes,
+            BindPoses = [],
+            BoneNameHashes = [],
+        };
+    }
+
     /// Whether this mesh carries an outline shell: a copy of itself, a little larger and turned
     /// inside out, which the game draws as a silhouette by showing only the side facing away from
     /// you. Nothing in the object says so, so it is measured, and two things have to hold.
     ///
     /// **The normals have to mean something.** Compared against the winding of the triangle they
     /// belong to, which is the other account of which side is out. A mesh whose two accounts disagree
-    /// cannot be asked which side is out, and culling it by facing hollows it. This was first seen on
-    /// #14 Battle Shovel, which disagreed on half its triangles — because its half-float normals were
-    /// being read four wide, not because the shovel is built that way; read right, it agrees on all
-    /// of them. The check stays, as the guard against normals that really are wrong.
+    /// cannot be asked which side is out, and culling it by facing hollows it — so one that disagrees
+    /// on more than a tenth of its triangles carries no shell as far as this is concerned. That is
+    /// the guard against normals that really are wrong.
     ///
     /// **And the mesh has to lean inwards.** Each triangle's normal is weighed against the
     /// direction out from the middle: a surface facing outwards counts for, one facing inwards
@@ -97,6 +193,20 @@ public sealed record UnityMesh
     /// Worked out on every ask rather than kept: it is one pass over the triangles and a handful of
     /// multiplications, which is nothing beside the rasterizing it decides, and a cached answer in a
     /// record is a field that quietly joins its equality.
+    ///
+    /// **A shell can also be one submesh of the model rather than the whole of it**, and then the
+    /// sum above is drowned: Turbo Cat's 504-triangle shell comes to -435 and its 752-triangle body
+    /// to +579, so the mesh as a whole leans outwards by +145 and the shell is drawn as a surface
+    /// over the cat. So each submesh is weighed on its own as well.
+    ///
+    /// A submesh leaning inwards is not enough by itself — 58 of the game's items have one, and
+    /// most are the inside of a barrel or the back face of a sight, a few triangles each. What
+    /// tells a shell from one of those is that **a shell wraps the whole model**: its bounding box
+    /// fills the model's in all three directions. Measured over every item: of those 58, exactly
+    /// two fill nine tenths of the model — Turbo Cat at 0.98 and the salesman avatar at 1.00 — and
+    /// the next one down fills 0.89 while leaning inwards by only -0.013, a twentieth of Turbo
+    /// Cat's -0.204. Both margins are wide and on different axes, so both are required. No weapon
+    /// is caught.
     public bool CarriesAnOutline
     {
         get
@@ -138,8 +248,61 @@ public sealed record UnityMesh
                 if (wx * nx + wy * ny + wz * nz >= 0) agree++;
             }
 
-            return all > 0 && agree >= all * 0.9f && lean < 0;
+            if (all == 0 || agree < all * 0.9f) return false;
+            return lean < 0 || SubMeshes.Count > 1 && SubMeshes.Any(part => Wraps(positions, normals, part));
         }
+    }
+
+    /// Whether one submesh is a shell around the whole model: leaning inwards, and filling the
+    /// model's own box in all three directions. See CarriesAnOutline for the measurements.
+    private bool Wraps(float[] positions, float[] normals, SubMesh part)
+    {
+        var whole = MeshBounds.Of(this, positions);
+        var (wx, wy, wz) = whole.Size;
+        if (wx <= 0 || wy <= 0 || wz <= 0) return false;
+
+        var lean = 0f;
+        var triangles = 0;
+        var radius = 0f;
+        var (lowX, lowY, lowZ) = (float.MaxValue, float.MaxValue, float.MaxValue);
+        var (highX, highY, highZ) = (float.MinValue, float.MinValue, float.MinValue);
+
+        var to = Math.Min(part.IndexStart + part.IndexCount, Indices.Length);
+        for (var i = Math.Max(part.IndexStart, 0); i + 2 < to; i += 3)
+        {
+            var (a, b, c) = (Indices[i], Indices[i + 1], Indices[i + 2]);
+            if (a < 0 || b < 0 || c < 0) continue;
+            if (a >= VertexCount || b >= VertexCount || c >= VertexCount) continue;
+
+            var nx = normals[a * 3] + normals[b * 3] + normals[c * 3];
+            var ny = normals[a * 3 + 1] + normals[b * 3 + 1] + normals[c * 3 + 1];
+            var nz = normals[a * 3 + 2] + normals[b * 3 + 2] + normals[c * 3 + 2];
+
+            lean += (Middle(positions, a, b, c, 0) - whole.Centre.X) * nx
+                + (Middle(positions, a, b, c, 1) - whole.Centre.Y) * ny
+                + (Middle(positions, a, b, c, 2) - whole.Centre.Z) * nz;
+            triangles++;
+
+            foreach (var vertex in stackalloc[] { a, b, c })
+            {
+                var (x, y, z) = (positions[vertex * 3], positions[vertex * 3 + 1], positions[vertex * 3 + 2]);
+                (lowX, lowY, lowZ) = (MathF.Min(lowX, x), MathF.Min(lowY, y), MathF.Min(lowZ, z));
+                (highX, highY, highZ) = (MathF.Max(highX, x), MathF.Max(highY, y), MathF.Max(highZ, z));
+
+                var (dx, dy, dz) = (x - whole.Centre.X, y - whole.Centre.Y, z - whole.Centre.Z);
+                radius = MathF.Max(radius, MathF.Sqrt(dx * dx + dy * dy + dz * dz));
+            }
+        }
+
+        if (triangles == 0 || radius <= 0) return false;
+
+        // Against what a surface of this many triangles facing straight out would come to, so that
+        // a cat and a pistol are the same question.
+        if (lean / (triangles * 3f * radius) > -0.05f) return false;
+
+        var fills = MathF.Min(
+            MathF.Min((highX - lowX) / wx, (highY - lowY) / wy), (highZ - lowZ) / wz);
+        return fills >= 0.9f;
     }
 
     private static float Middle(float[] positions, int a, int b, int c, int axis)
@@ -149,8 +312,6 @@ public sealed record UnityMesh
         => (positions[to * 3] - positions[from * 3],
             positions[to * 3 + 1] - positions[from * 3 + 1],
             positions[to * 3 + 2] - positions[from * 3 + 2]);
-
-
 
     /// Byte payloads sit either on the field itself or on its Array child, depending on the type.
     private static byte[] Bytes(AssetTypeValueField field)
@@ -182,9 +343,8 @@ public sealed record UnityMesh
 
         // Some meshes keep their vertices in the bundle's .resS rather than in the object, exactly
         // as most textures keep their pixels — the object then carries an empty buffer and a place
-        // to find the real one. It was refused outright, so those weapons had no model at all:
-        // #14 Battle Shovel is one, and the export wrote a field dump where a .glb should have
-        // been. The index buffer stays in the object either way.
+        // to find the real one. #14 Battle Shovel is one. The index buffer stays in the object
+        // either way.
         var stream = field["m_StreamData"];
         if (stream["path"].AsString is { Length: > 0 } outside)
         {
@@ -360,10 +520,10 @@ public sealed record UnityMesh
             }
             // A position or a normal is three components however it is kept. Unity pads a half-float
             // one out to four, because an attribute has to fill whole four-byte steps, and everything
-            // that reads these takes three a vertex. Left four wide, the preview read every vertex
-            // after the first out of its neighbours' components, and 55 main meshes in the game —
-            // eleven weapons, #14 Battle Shovel among them, and King's Crown — shaded in alternating
-            // light and dark triangles.
+            // that reads these takes three a vertex. Left four wide, every vertex after the first is
+            // read out of its neighbours' components, and 55 main meshes in the game — eleven
+            // weapons, #14 Battle Shovel among them, and King's Crown — shade in alternating light
+            // and dark triangles.
             var keep = channel.Attribute is VertexAttribute.Position or VertexAttribute.Normal
                 ? Math.Min(channel.Dimension, 3)
                 : channel.Dimension;

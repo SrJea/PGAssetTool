@@ -22,8 +22,8 @@ public sealed record AssetAddress(
 /// Resolves between path ids and the name-based address, per serialized file.
 ///
 /// Indexed one class at a time, because an address only ever looks among its own class. Indexing
-/// the whole container read the name of every GameObject and MonoBehaviour in a prefab bundle to
-/// address one texture, and that was a large part of what extracting a weapon cost.
+/// the whole container reads the name of every GameObject and MonoBehaviour in a prefab bundle to
+/// address one texture, which is a large part of what extracting a weapon costs.
 public sealed class ContainerIndex(AssetsContext context)
 {
     private readonly Dictionary<(string Container, int Class), Dictionary<string, List<long>>> _byContainer = new();

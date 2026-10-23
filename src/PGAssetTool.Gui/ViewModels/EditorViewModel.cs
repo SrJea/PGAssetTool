@@ -268,10 +268,10 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
         var manifest = workspace is null ? null : Details(workspace.Directory);
 
         // The watcher re-reads the workspace whenever anything in it is written — the form's own
-        // saves, and a texture saved from an image editor alike — and every re-read refilled the
-        // form from disk. Whatever was half-typed into the description went with it, without a
-        // word. The same workspace keeps its typing now; a different one, or Revert, starts again
-        // from the file.
+        // saves, and a texture saved from an image editor alike — so a re-read that refilled the
+        // form from disk would take whatever was half-typed into the description with it, without a
+        // word. The same workspace keeps its typing; a different one, or Revert, starts again from
+        // the file.
         var keep = keepTyping && workspace is not null && TextEdited
             && string.Equals(_shown?.Directory, workspace.Directory, StringComparison.OrdinalIgnoreCase);
 
@@ -682,9 +682,9 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
             if (!ReferenceEquals(_dressed.Reader, bundles))
                 _dressed = (bundles, new Dressing(bundles));
 
-            // In submesh order, holes and all. It used to be flattened to a set of path ids here,
-            // which was enough to mark the list and not enough to dress the model: #145's one mesh
-            // has the gun in submesh 0 and the flashlight in submesh 1, wearing two pictures.
+            // In submesh order, holes and all. Flattened to a set of path ids it is enough to mark
+            // the list and not enough to dress the model: #145's one mesh has the gun in submesh 0
+            // and the flashlight in submesh 1, wearing two pictures.
             return _dressed.Dressing!.For(file.Target.Container, mesh, named);
         }
         catch (Exception)
@@ -811,7 +811,7 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
     /// it is read from disk rather than assumed to be still on the model.
     /// </param>
     /// <param name="dressed">
-    /// Whether the model already went on wearing its own paint, in which case the list is for
+    /// Whether the model is already wearing its own paint, in which case the list is for
     /// trying something else rather than for choosing what it should have been wearing.
     /// </param>
     private void Offer(PreviewViewModel preview, string? wearing = null, bool dressed = false)
@@ -902,7 +902,7 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
         }
 
         // A .glb dropped while an animation is selected is an animation for it, unless it is named
-        // like one of the workspace's models — which is then what it replaces, as before.
+        // like one of the workspace's models, which is then what it replaces.
         if (IsAnimation && paths.Count == 1
             && string.Equals(Path.GetExtension(paths[0]), ".glb", StringComparison.OrdinalIgnoreCase)
             && Destination(paths[0]) is null)

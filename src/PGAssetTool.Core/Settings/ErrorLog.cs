@@ -7,8 +7,8 @@ namespace PGAssetTool.Core.Settings;
 ///
 /// The window says what failed in one line — the message and what it was doing — and that is
 /// enough for the person in front of it and nothing like enough for anybody fixing it from a
-/// report: the stack is gone, and so is which version said it. A crash said nothing at all; the
-/// window simply went. So both go into `PGAssetTool-data/logs`, beside everything else the tool
+/// report: the stack is gone, and so is which version said it. A crash says nothing at all — the
+/// window simply goes. So both go into `PGAssetTool-data/logs`, beside everything else the tool
 /// keeps: every reported error appended to one file, and every crash in a file of its own, which
 /// is what to ask somebody to send.
 public static class ErrorLog

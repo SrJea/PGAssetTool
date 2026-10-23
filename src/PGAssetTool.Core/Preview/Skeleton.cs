@@ -56,24 +56,31 @@ public sealed class Skeleton
     ///
     /// Several renderers draw the same mesh and they disagree: a weapon's own prefab holds one, and
     /// the `<prefab>_info` prefab the game's shop shows holds another, arranged its own way — which
-    /// is where #943's two swords are crossed. Whichever of them comes first in the bundle is what
+    /// is where #943's two swords are crossed, and where a transport's body comes back standing a
+    /// metre from its own wheels. Whichever of them comes first in the bundle is what
     /// answering by mesh alone gives, and that is an accident of file order. Naming the root is how
     /// a caller says which arrangement it means.
     /// </param>
-    public static Skeleton? For(BundleSet bundles, string bundle, long meshPathId, string? under = null)
+    /// <param name="whole">
+    /// Read every object in the prefab rather than only the ones this mesh is skinned to. What that
+    /// is for is on `Build`.
+    /// </param>
+    public static Skeleton? For(
+        BundleSet bundles, string bundle, long meshPathId, string? under = null, bool whole = false)
     {
         AssetsFileInstance file;
         try { file = bundles.Open(bundle); }
         catch (Exception e) when (e is IOException or FileNotFoundException) { return null; }
 
-        foreach (var info in file.file.AssetInfos)
-        {
-            if (info.TypeId != (int)AssetClassID.SkinnedMeshRenderer) continue;
+        var read = Hierarchy.Of(bundles, file);
 
-            var renderer = bundles.Context.Deserialize(file, info);
+        foreach (var drawing in read.Drawn(meshPathId))
+        {
+            if (!drawing.Skinned) continue;
+
+            var renderer = read.Field(drawing.Info);
             if (renderer is null) continue;
-            if (renderer["m_Mesh"]["m_PathID"].AsLong != meshPathId) continue;
-            if (under is not null && !Beneath(bundles, file, renderer["m_GameObject"], under)) continue;
+            if (under is not null && !RootedAt(bundles, file, renderer["m_GameObject"], under)) continue;
 
             var bones = renderer["m_Bones"]["Array"].Children
                 .Select(b => b["m_PathID"].AsLong)
@@ -87,10 +94,144 @@ public sealed class Skeleton
             var owner = renderer["m_GameObject"];
             var mine = owner.IsDummy ? 0 : TransformOf(bundles, file, owner["m_PathID"].AsLong);
 
-            return Build(bundles, file, bones, mine);
+            return Build(bundles, file, bones, mine, whole: whole);
         }
 
-        return Unskinned(bundles, file, meshPathId);
+        return Unskinned(bundles, file, meshPathId, under, whole);
+    }
+
+    /// One place a mesh is drawn: the renderer that draws it there, as a skeleton, and the name of
+    /// every object it hangs under, its own first and the top of the hierarchy last.
+    ///
+    /// The names are what tells one placement from another, and every caller asks something
+    /// different of them — which hierarchy this is, whether the game draws this copy as an outline
+    /// shell — so what is handed over is where it hangs rather than a verdict about it.
+    public sealed record Placement(Skeleton Skeleton, IReadOnlyList<string> Under)
+    {
+        /// The top of the hierarchy: the prefab this placement belongs to.
+        public string Root => Under.Count > 0 ? Under[^1] : "";
+    }
+
+    /// Every place a mesh is drawn, in the order the file holds them.
+    ///
+    /// The game draws one copy of a mesh per renderer that names it, and a prefab puts the same mesh
+    /// down more than once: a transport's wheels are one 72-vertex mesh placed ten times, and 82 of
+    /// the 90 transports place something more than once — up to twenty times on
+    /// `fps_all_terrain_vehicle`. <see cref="For"/> answers one of them, which is one wheel.
+    ///
+    /// `Root` is what tells one arrangement from another, and a caller takes the placements of one
+    /// root rather than all of them: the same parts appear again under the `<item>_shop` prefab,
+    /// arranged its own way, so drawing every placement there is draws each wheel twice, in two
+    /// different places.
+    public static IReadOnlyList<Placement> Every(
+        BundleSet bundles, string bundle, long meshPathId, bool whole = false)
+    {
+        if (Opened(bundles, bundle) is not { } file) return [];
+
+        var placements = new List<Placement>();
+
+        foreach (var (skinned, renderer, mine) in Renderers(bundles, file, meshPathId))
+        {
+            Skeleton? skeleton;
+            if (skinned)
+            {
+                var bones = renderer["m_Bones"]["Array"].Children
+                    .Select(b => b["m_PathID"].AsLong)
+                    .Where(id => id != 0)
+                    .ToList();
+                if (bones.Count == 0) continue;
+
+                skeleton = Build(bundles, file, bones, mine, whole: whole);
+            }
+            else skeleton = Build(bundles, file, [mine], mine, rigid: true, whole: whole);
+
+            if (skeleton is null) continue;
+
+            placements.Add(new Placement(skeleton, Ancestry(bundles, file, mine)));
+        }
+
+        return placements;
+    }
+
+    /// Where each copy of a mesh hangs, as <see cref="Placement.Under"/> and nothing else.
+    ///
+    /// The same scan without the rigs, for a caller deciding which hierarchy it wants before paying
+    /// for them: a transport's parts come to twenty placements and a rig read whole is most of what
+    /// a placement costs.
+    public static IReadOnlyList<IReadOnlyList<string>> Placings(
+        BundleSet bundles, string bundle, long meshPathId)
+    {
+        if (Opened(bundles, bundle) is not { } file) return [];
+
+        return [.. Renderers(bundles, file, meshPathId).Select(r => Ancestry(bundles, file, r.Transform))];
+    }
+
+    private static AssetsFileInstance? Opened(BundleSet bundles, string bundle)
+    {
+        try { return bundles.Open(bundle); }
+        catch (Exception e) when (e is IOException or FileNotFoundException) { return null; }
+    }
+
+    /// Every renderer in a bundle that names this mesh, with the transform it hangs off.
+    private static IEnumerable<(bool Skinned, AssetTypeValueField Renderer, long Transform)> Renderers(
+        BundleSet bundles, AssetsFileInstance file, long meshPathId)
+    {
+        var read = Hierarchy.Of(bundles, file);
+
+        foreach (var drawing in read.Drawn(meshPathId))
+        {
+            if (drawing.Owner == 0 || read.Field(drawing.Info) is not { } field) continue;
+
+            var mine = read.TransformOf(drawing.Owner);
+            if (mine != 0) yield return (drawing.Skinned, field, mine);
+        }
+    }
+
+    /// Whether the game draws this mesh at all.
+    ///
+    /// **A MeshFilter says which mesh; a MeshRenderer beside it is what draws one.** A filter with
+    /// no renderer on its object is a collider's geometry — `fps_all_terrain_vehicle_collider` says
+    /// so in its name, #28 Tree calls its one `box`, and the pair of arms a few weapons carry under
+    /// `FPS_PLAYER_Arm_left`/`_Right` are the same thing. The game draws none of them and nor should
+    /// a preview: drawn, they are the white slab in the middle of #7, #11, #14 and #28. A renderer
+    /// switched off is not drawn either.
+    ///
+    /// Size is no guide to it. Measured over 618 items: of the 26 parts small enough to be a
+    /// marker, 21 are drawn by nothing and the other five are real — `avatar_agent_harn`'s eye, a
+    /// rover's glass — so the renderer is what answers.
+    ///
+    /// Asked of the parts drawn beside a model rather than of the model on the row, which is shown
+    /// because somebody asked for it whatever draws it.
+    public static bool Drawn(BundleSet bundles, string bundle, long meshPathId)
+    {
+        AssetsFileInstance file;
+        try { file = bundles.Open(bundle); }
+        catch (Exception e) when (e is IOException or FileNotFoundException) { return false; }
+
+        var read = Hierarchy.Of(bundles, file);
+
+        foreach (var drawing in read.Drawn(meshPathId))
+        {
+            if (drawing.Skinned)
+            {
+                if (drawing.Enabled) return true;
+                continue;
+            }
+
+            if (read.Field(drawing.Owner) is not { } holder) continue;
+
+            foreach (var component in holder["m_Component"]["Array"].Children)
+            {
+                var id = component["component"]["m_PathID"].AsLong;
+                if (file.file.GetAssetInfo(id) is not { TypeId: (int)AssetClassID.MeshRenderer } found) continue;
+
+                var renderer = read.Field(found);
+                if (renderer is null) continue;
+                if (renderer["m_Enabled"].IsDummy || renderer["m_Enabled"].AsInt != 0) return true;
+            }
+        }
+
+        return false;
     }
 
     /// A mesh nothing skins, moved by moving the object it hangs off.
@@ -98,77 +239,90 @@ public sealed class Skeleton
     /// A MeshFilter names the mesh, and a clip moves the MeshFilter's own transform by name, so that
     /// transform is the one bone and every vertex rides on it. #8's Old Combat Knife skin is built
     /// this way: its blade is a plain mesh that five clips of its own swing about.
-    private static Skeleton? Unskinned(BundleSet bundles, AssetsFileInstance file, long meshPathId)
+    ///
+    /// `under` means here what it means above, and it matters most here: the parts of a transport
+    /// are plain meshes, each put down several times over two arrangements, so the first filter in
+    /// the file is a wheel of the shop's copy as often as not.
+    private static Skeleton? Unskinned(
+        BundleSet bundles, AssetsFileInstance file, long meshPathId, string? under, bool whole = false)
     {
-        foreach (var info in file.file.AssetInfos)
-        {
-            if (info.TypeId != (int)AssetClassID.MeshFilter) continue;
+        var read = Hierarchy.Of(bundles, file);
 
-            var filter = bundles.Context.Deserialize(file, info);
-            if (filter is null || filter["m_Mesh"]["m_PathID"].AsLong != meshPathId) continue;
+        foreach (var drawing in read.Drawn(meshPathId))
+        {
+            if (drawing.Skinned || read.Field(drawing.Info) is not { } filter) continue;
 
             var owner = filter["m_GameObject"];
-            var transform = owner.IsDummy ? 0 : TransformOf(bundles, file, owner["m_PathID"].AsLong);
-            if (transform == 0) return null;
+            if (under is not null && !RootedAt(bundles, file, owner, under)) continue;
 
-            return Build(bundles, file, [transform], transform, rigid: true);
+            var transform = drawing.Owner == 0 ? 0 : read.TransformOf(drawing.Owner);
+            if (transform == 0) continue;
+
+            return Build(bundles, file, [transform], transform, rigid: true, whole: whole);
         }
 
         return null;
     }
 
-    /// Whether this object hangs somewhere under one of the given name.
+    /// Whether this object's hierarchy is the one of the given name, read at its top.
+    ///
+    /// The top rather than any step of the chain, because the game names the two arrangements of an
+    /// item after the item: `royale_car_braided`'s body hangs under an object of its own name in
+    /// both, and the shop's — `royale_car_braided < royale_car_braided_shop` — answers a test that
+    /// asks whether the name appears anywhere above. Its body stands 2.76 higher than the item's
+    /// own, so taken for the item's it is a car floating over its own wheels. `Placement.Root`
+    /// reads the same end of the same chain.
+    private static bool RootedAt(
+        BundleSet bundles, AssetsFileInstance file, AssetTypeValueField owner, string root)
+        => !owner.IsDummy
+            && Ancestry(bundles, file, TransformOf(bundles, file, owner["m_PathID"].AsLong))
+                is { Count: > 0 } names
+            && string.Equals(names[^1], root, StringComparison.OrdinalIgnoreCase);
+
+    /// The names of this transform's own object and of every object above it, the top last.
     ///
     /// Walked up rather than down: an object has one parent and a root has hundreds of descendants,
     /// and the chain from a weapon's mesh to its prefab root is a handful of steps. The count is a
     /// guard against a hierarchy that points at itself, which a bundle this tool did not write
     /// could hold.
-    private static bool Beneath(
-        BundleSet bundles, AssetsFileInstance file, AssetTypeValueField owner, string root)
+    private static List<string> Ancestry(BundleSet bundles, AssetsFileInstance file, long transform)
     {
-        if (owner.IsDummy) return false;
-
-        var transform = TransformOf(bundles, file, owner["m_PathID"].AsLong);
+        var read = Hierarchy.Of(bundles, file);
+        var names = new List<string>();
 
         for (var step = 0; transform != 0 && step < 64; step++)
         {
-            var info = file.file.GetAssetInfo(transform);
-            var field = info is null ? null : bundles.Context.Deserialize(file, info);
-            if (field is null) return false;
+            if (read.Object(transform) is not { } node) break;
 
-            var holder = field["m_GameObject"];
-            if (!holder.IsDummy
-                && file.file.GetAssetInfo(holder["m_PathID"].AsLong) is { } named
-                && string.Equals(bundles.Context.NameOf(file, named), root, StringComparison.OrdinalIgnoreCase))
-                return true;
-
-            var father = field["m_Father"];
-            transform = father.IsDummy ? 0 : father["m_PathID"].AsLong;
+            names.Add(node.Name);
+            transform = node.Parent;
         }
 
-        return false;
+        return names;
     }
 
     private static long TransformOf(BundleSet bundles, AssetsFileInstance file, long gameObject)
-    {
-        var info = file.file.GetAssetInfo(gameObject);
-        var field = info is null ? null : bundles.Context.Deserialize(file, info);
-        if (field is null) return 0;
-
-        foreach (var component in field["m_Component"]["Array"].Children)
-        {
-            var id = component["component"]["m_PathID"].AsLong;
-            if (file.file.GetAssetInfo(id) is { TypeId: (int)AssetClassID.Transform }) return id;
-        }
-
-        return 0;
-    }
+        => Hierarchy.Of(bundles, file).TransformOf(gameObject);
 
     /// Walks up from each bone to the top, so every transform between them is present and a parent
     /// always comes before its children.
+    ///
+    /// <param name="whole">
+    /// Also walk down from the top, so that every object in the prefab is a joint and not only the
+    /// ones a mesh is skinned to.
+    ///
+    /// A bone list answers what moves the vertices, which is all posing one mesh needs. It is not
+    /// what a clip drives: measured over 400 weapons, the clips of 90 of them drive objects no mesh
+    /// is skinned to — `Point_Arm_Left` and `Point_Arm_Right` most often, then `Bone_Shutter`,
+    /// `Bone_Bullet`, `Bone_Clips` — which a skeleton built from bones alone has nowhere to put. The
+    /// extra joints carry no vertices and change no pose; they give the rest of the clip somewhere
+    /// to land, and they are what lets two meshes of one prefab be posed in the same space.
+    /// </param>
     private static Skeleton? Build(
-        BundleSet bundles, AssetsFileInstance file, IReadOnlyList<long> bones, long renderer, bool rigid = false)
+        BundleSet bundles, AssetsFileInstance file, IReadOnlyList<long> bones, long renderer,
+        bool rigid = false, bool whole = false)
     {
+        var read = Hierarchy.Of(bundles, file);
         var joints = new List<Joint>();
         var at = new Dictionary<long, int>();
 
@@ -176,32 +330,48 @@ public sealed class Skeleton
         {
             if (at.TryGetValue(transform, out var known)) return known;
 
-            var info = file.file.GetAssetInfo(transform);
-            var field = info is null ? null : bundles.Context.Deserialize(file, info);
-            if (field is null) return -1;
+            if (read.Object(transform) is not { } node) return -1;
 
-            var father = field["m_Father"];
-            var parent = father.IsDummy || father["m_PathID"].AsLong == 0
-                ? -1
-                : Add(father["m_PathID"].AsLong);
+            var parent = node.Parent == 0 ? -1 : Add(node.Parent);
 
             // After the parent, always: everything downstream reads this list in order and expects
             // to have seen whoever it hangs off already.
-            var owner = field["m_GameObject"];
-            var named = owner.IsDummy ? null : file.file.GetAssetInfo(owner["m_PathID"].AsLong);
-            var name = (named is null ? null : bundles.Context.Deserialize(file, named))?["m_Name"].AsString
-                ?? "?";
+            var path = parent >= 0 ? $"{joints[parent].Path}/{node.Name}" : node.Name;
 
-            var path = parent >= 0 ? $"{joints[parent].Path}/{name}" : name;
-
-            joints.Add(new Joint(name, path, parent, Trs(field)));
+            joints.Add(new Joint(node.Name, path, parent, node.Local));
             return at[transform] = joints.Count - 1;
         }
 
         var order = bones.Select(Add).ToList();
         var root = renderer == 0 ? -1 : Add(renderer);
+        if (order.Any(i => i < 0)) return null;
 
-        return order.Any(i => i < 0) ? null : new Skeleton(joints, order, root, rigid);
+        // Down from whatever the walk up reached, if the caller wants the whole prefab. Taken from
+        // the tops rather than from the renderer, because the renderer sits part way down and the
+        // objects a clip drives are spread across the whole of it.
+        if (whole)
+        {
+            var tops = at.Where(pair => joints[pair.Value].Parent < 0).Select(pair => pair.Key).ToList();
+            foreach (var top in tops) Descend(top, 0);
+        }
+
+        void Descend(long transform, int depth)
+        {
+            // A hierarchy that points at itself would otherwise be walked for ever. The deepest
+            // rig measured in this game is 78 objects, so this is far above anything real.
+            if (depth > 64) return;
+            if (read.Object(transform) is not { } node) return;
+
+            foreach (var id in node.Children)
+            {
+                // Already a joint from the walk up, or added now. Either way it is descended into:
+                // the objects a clip drives hang below bones as often as beside them.
+                if (!at.ContainsKey(id) && Add(id) < 0) continue;
+                Descend(id, depth + 1);
+            }
+        }
+
+        return new Skeleton(joints, order, root, rigid);
     }
 
     private static float[] Trs(AssetTypeValueField transform)
@@ -276,19 +446,28 @@ public sealed class Skeleton
     ///
     /// A skinned mesh is written in the space its bind poses map from, and what makes that the
     /// assembled model is every bone carrying the same skinning matrix at rest — which is what
-    /// nearly every weapon in this game does, and what drawing the mesh as it is written quietly
-    /// assumed. It is not true of all of them: measured over every weapon, **518 of 1517** have a
-    /// vertex further than a fiftieth of the model's own radius from where its bones put it, and
-    /// the worst of them throw a piece two thousand radii away, which is why one weapon in three
-    /// was drawn scattered and tiny — the far-flung pieces are in the bounding box that the framing
-    /// is worked out from.
+    /// nearly every weapon in this game does. It is not true of all of them: measured over every
+    /// weapon, **518 of 1517** have a vertex further than a fiftieth of the model's own radius from
+    /// where its bones put it, and the worst of them throw a piece two thousand radii away. Drawn
+    /// as written that is one weapon in three scattered and tiny, the far-flung pieces being inside
+    /// the bounding box the framing is worked out from.
     ///
-    /// Beretta_3_Mesh moves by 0.000 through this and adventure_swords_mesh by 0.012, so the
-    /// weapons that were already drawn right are drawn identically.
+    /// Beretta_3_Mesh moves by 0.000 through this and adventure_swords_mesh by 0.012, so a weapon
+    /// that needs none of it is drawn identically.
     ///
     /// Posing a clip starts from the mesh as it was written, never from this: the pose already
     /// carries the bones' own transforms, and starting here would apply them twice.
     public UnityMesh Assembled(UnityMesh mesh) => Pose(mesh, null, 0f);
+
+    /// The same, but left where the prefab hangs it rather than where it was read.
+    ///
+    /// Posing normally takes a mesh back into its own space, so that a model at rest is the model as
+    /// it was written (see `home` in Pose). That is right for one mesh and wrong for two: a weapon
+    /// and the arms that hold it are different meshes of one prefab, each written in its own space,
+    /// and normalising each to its own puts them in two different places. Asking for the prefab's
+    /// space instead is what lets them be shown together. One mesh on its own has no use for it.
+    public UnityMesh Placed(UnityMesh mesh, Motion? motion, float time)
+        => Pose(mesh, motion, time, common: true);
 
     /// The mesh with its vertices moved to where this clip puts them at this moment.
     ///
@@ -296,23 +475,24 @@ public sealed class Skeleton
     /// weight, and ends up at the weighted sum of where each of them would put it. The bind pose is
     /// what takes a vertex out of the model's own space and into the bone's, which is why it is
     /// stored with the mesh rather than with the skeleton.
-    public UnityMesh Pose(UnityMesh mesh, Motion? motion, float time)
+    public UnityMesh Pose(UnityMesh mesh, Motion? motion, float time, bool common = false)
     {
         if (mesh.Get(VertexAttribute.Position) is not { } positions) return mesh;
 
         // One object, one matrix: where it is now, taken back out of where it sits at rest, so the
         // model at rest is the model as it was read.
         if (Rigid)
-            return Carried(mesh, positions,
-                Matrix.Times(Matrix.Inverse(Rest[Bones[0]]), World(motion, time)[Bones[0]]));
+            return Carried(mesh, positions, common
+                ? World(motion, time)[Bones[0]]
+                : Matrix.Times(Matrix.Inverse(Rest[Bones[0]]), World(motion, time)[Bones[0]]));
 
         if (mesh.Get(VertexAttribute.BlendIndices) is not { } joints) return mesh;
         if (mesh.BindPoses.Count == 0) return mesh;
 
         // A mesh carried by one bone per vertex has no weights at all — there is nothing to weigh
         // against — and that is how this game's weapons are rigged: the slide belongs to the slide's
-        // bone and to nothing else. Reading the missing channel as "no weight anywhere" left every
-        // vertex where it started, which looks exactly like an animation that does nothing.
+        // bone and to nothing else. Reading the missing channel as "no weight anywhere" leaves
+        // every vertex where it started, which looks exactly like an animation that does nothing.
         var weights = mesh.Get(VertexAttribute.BlendWeight);
         var wide = mesh.Dimensions.GetValueOrDefault(VertexAttribute.BlendIndices, 1);
 
@@ -325,8 +505,9 @@ public sealed class Skeleton
         // origin, where its prefab hangs them a metre and a half up and to the right. So the space
         // is taken from the model itself — at rest, every bone's skinning matrix is the same one,
         // and its inverse is by construction the transform that leaves the mesh where it was read.
-        var home = Matrix.Inverse(Matrix.Times(
-            Rest[Bones[0]], Matrix.FromRows(mesh.BindPoses[0])));
+        var home = common
+            ? Matrix.Identity
+            : Matrix.Inverse(Matrix.Times(Rest[Bones[0]], Matrix.FromRows(mesh.BindPoses[0])));
 
         // One matrix per bone: where the bone is now, applied after taking the vertex into its space.
         var skinning = new float[Bones.Count][];
@@ -405,7 +586,29 @@ public sealed class Skeleton
         return mesh with { Attributes = attributes };
     }
 
-    /// Every vertex and normal moved by the same matrix.
+    /// The matrix that takes this skeleton's own space back into the space `mesh` was written in.
+    ///
+    /// It is what `Pose` applies when it is not asked for the prefab's space — the thing that makes
+    /// a model at rest the model as it was read. Handed out because several meshes shown together
+    /// have to be joined in the prefab's space, where they share one, and then taken back into the
+    /// model's own: everything that reads a weapon's facing reads it there. `Facing.LandmarksIn`
+    /// answers in the model's space, and measured against a model in the prefab's the muzzle comes
+    /// out at whichever end the two spaces happen to agree on.
+    public float[]? Home(UnityMesh mesh)
+    {
+        if (Bones.Count == 0 || Bones[0] >= Rest.Length) return null;
+        if (Rigid) return Matrix.Inverse(Rest[Bones[0]]);
+        return mesh.BindPoses.Count == 0
+            ? null
+            : Matrix.Inverse(Matrix.Times(Rest[Bones[0]], Matrix.FromRows(mesh.BindPoses[0])));
+    }
+
+    /// The same mesh moved by one matrix, positions and normals alike.
+    public static UnityMesh Moved(UnityMesh mesh, float[] matrix)
+        => mesh.Get(VertexAttribute.Position) is { } positions
+            ? Carried(mesh, positions, matrix)
+            : mesh;
+
     private static UnityMesh Carried(UnityMesh mesh, float[] positions, float[] m)
     {
         var moved = new float[positions.Length];

@@ -20,8 +20,7 @@ public class ReplaceableTests
     [Fact]
     public void AFormatWithNoImportPathIsNotOfferedAtAll()
     {
-        // A workspace listing one of these would produce a pack that fails when applied. Raw bytes
-        // went back once; they do not now.
+        // A workspace listing one of these would produce a pack that fails when applied.
         Assert.Null(Replaceable.OperationForFormat("json"));
         Assert.Null(Replaceable.OperationForFormat("dat"));
         Assert.Null(Replaceable.OperationForFormat(""));

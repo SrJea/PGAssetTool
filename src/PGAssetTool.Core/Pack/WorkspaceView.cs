@@ -54,7 +54,7 @@ public sealed record WorkspaceView(string Directory, PackManifest Manifest, IRea
 
         // A folder this cannot look into is a folder with no workspace in it as far as this is
         // concerned. The overload that takes a SearchOption throws at the first one instead, which
-        // made one unreadable directory anywhere under the workspace root — and the root is
+        // makes one unreadable directory anywhere under the workspace root — and the root is
         // wherever the author points it — the end of the whole list.
         return System.IO.Directory
             .EnumerateDirectories(root, "*",
@@ -74,7 +74,7 @@ public sealed record WorkspaceView(string Directory, PackManifest Manifest, IRea
 
         // One row per file rather than per operation. A file can stand for more than one asset — a
         // weapon's paint and the identical copy its default skin paints with are both written from
-        // the one picture — and a row per operation listed the same image twice.
+        // the one picture — and a row per operation lists the same image twice.
         var files = manifest.Operations
             .GroupBy(o => o.Source, StringComparer.OrdinalIgnoreCase)
             .Select(group =>

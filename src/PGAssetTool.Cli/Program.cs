@@ -166,8 +166,8 @@ static int Run(CommandLine line)
 
     // The game as shipped: show and extract are about the item, not about whatever mod is
     // installed over it. Anything that writes or verifies goes to the installation directly.
-    // Unpacked into memory up to a limit, because reading them from disk a block at a time was most of
-    // what resolving and extracting cost. See BundleUnpacker.
+    // Unpacked into memory up to a limit, because reading them from disk a block at a time is most
+    // of what resolving and extracting costs. See BundleUnpacker.
     using var bundles = new BundleSet(game, originals: new ModStore(game).OriginalOf)
     {
         UnpackBudget = line.Number("read-memory", 1024) * 1024L * 1024,
@@ -417,8 +417,15 @@ static int Info(GameInstallation game, BundleSet bundles)
     }
     else Console.WriteLine("Downloaded none yet; everything loads from the shipped cache");
     Console.WriteLine($"Data files {game.EnumerateSerializedFiles().Count()}");
-    Console.WriteLine($"Version    {GameVersion.Of(bundles.Context, game)
-        ?? $"unavailable ({ClassPackage.FileName} not found)"}");
+    // Two different kinds of nothing, and saying the wrong one sends somebody looking for a file
+    // that is already there. The version lives in `globalgamemanagers`, which carries no type tree,
+    // so it is read through the stock engine class database — and `PlayerSettings` is the one class
+    // that database does not always describe as a built game writes it. Measured against the game
+    // on Unity 6000.3.14f1: 18 of the 19 objects in `globalgamemanagers` read, and 400 of 400 in
+    // `globalgamemanagers.assets`; `PlayerSettings` alone runs off the end of its 908 bytes.
+    Console.WriteLine($"Version    {GameVersion.Of(bundles.Context, game) ?? (bundles.Context.HasClassDatabase
+        ? "unavailable (this game's PlayerSettings is not laid out as the engine class database has it)"
+        : $"unavailable ({ClassPackage.FileName} not found)")}");
     Console.WriteLine($"Tool data  {new ModStore(game).Home}");
     return 0;
 }
@@ -509,7 +516,7 @@ static int Mods(GameInstallation game)
     if (installed.Count == 0) Console.WriteLine("Nothing installed.");
 
     // As wide as the longest there is, so the columns line up: an id is the item's id, its look and
-    // eight characters more, and a fixed width ran most of them into the name beside them.
+    // eight characters more, and a fixed width runs most of them into the name beside them.
     var idWidth = installed.Select(m => TextColumn.DisplayWidth(m.Id)).DefaultIfEmpty(0).Max();
     var nameWidth = Math.Min(40, installed.Select(m => TextColumn.DisplayWidth(m.Name)).DefaultIfEmpty(0).Max());
 
@@ -549,7 +556,7 @@ static int Change(CommandLine line, GameInstallation game, BundleSet bundles, La
 
     // Everything past here rewrites the game's bundles, and the game holds them open while it runs:
     // a write that lands in the middle of that leaves a half-written file where a bundle was. The
-    // manager and the editor have always refused; this had not, and it is the same game.
+    // manager and the editor refuse for the same reason; it is the same game.
     if (GameProcess.IsRunning(game)) return GameIsRunning();
 
     // Said before the game is written to rather than after, and said whichever way it goes: a
@@ -877,7 +884,10 @@ static GameCatalogs LoadCatalogs(BundleSet bundles, string? language)
         throw new CommandLineException($"There is no language bundle called '{language}'. The game has: "
             + string.Join(", ", GameCatalogs.Languages(bundles).Select(l => $"{l.Bundle} ({l.Name})")) + ".");
 
-    return GameCatalogs.Load(bundles, language ?? GameCatalogs.DefaultLanguage);
+    // Kept in this installation's own folder, the same one the window uses: a run of either reads
+    // what the other left. See WeaponNames.
+    return GameCatalogs.Load(
+        bundles, language ?? GameCatalogs.DefaultLanguage, remember: new ModStore(bundles.Game).Root);
 }
 
 /// A kind by the name a person would type it: `hat`, `Hat`, `hats`.
@@ -932,7 +942,7 @@ static string Heading(WeaponRecord record, WeaponTree tree)
 static string ModNamed(IReadOnlyList<InstalledMod> mods, string text)
 {
     // No id begins or ends in white space, and a carriage return copied in with one from a list
-    // made on Windows turned a mod that is plainly installed into one that is not.
+    // made on Windows turns a mod that is plainly installed into one that is not.
     text = text.Trim();
     if (mods.FirstOrDefault(m => m.Id == text) is { } exact) return exact.Id;
 

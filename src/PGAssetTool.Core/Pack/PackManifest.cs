@@ -35,8 +35,8 @@ public sealed record PackOperation
     /// extraction. The editor reads it to show the model dressed.
     ///
     /// Positional, because a submesh is what decides which material draws a triangle and a weapon
-    /// carrying two of them is ordinary. Flattened to the set of names that happened to be here, it
-    /// was enough to say which pictures a model wears and not enough to put them on it.
+    /// carrying two of them is ordinary. Flattened to a set of names it says which pictures a model
+    /// wears and not which of them goes where.
     public List<string> Wears { get; init; } = [];
 
     /// Whether the alpha channel of the file this comes from says which part of the image is used
@@ -46,6 +46,13 @@ public sealed record PackOperation
     /// the tool rather than to the author, so applying keeps what the game already had there — most
     /// of these textures hold emission in it, and writing a mask over that would put out the lights.
     public bool AlphaIsMask { get; init; }
+}
+
+/// The sorts of thing a pack can be for. One so far; declared here rather than spelled out at the
+/// one place that writes it, so whatever adds the second finds the first already named.
+public static class PackKind
+{
+    public const string Weapon = "weapon";
 }
 
 /// What a pack is for: which thing in the game, and which of its looks.
@@ -65,13 +72,6 @@ public sealed record PackOperation
 /// this is the label on the box. Applying reads it for one thing only: when an operation's asset is
 /// not in the bundle it names, this says which item's bundles to look through for it (Relocation).
 /// Where to look, never what is found — the asset found still has to be the one the operation names.
-/// The sorts of thing a pack can be for. One so far; declared here rather than spelled out at the
-/// one place that writes it, so whatever adds the second finds the first already named.
-public static class PackKind
-{
-    public const string Weapon = "weapon";
-}
-
 public sealed record PackSubject
 {
     /// What sort of thing this is: `weapon`, and one day `hat`, `cape`, `map`. Lower case, because
@@ -146,9 +146,8 @@ public sealed record PackManifest
     public const int CurrentFormatVersion = 2;
     public const string FileName = "pgmod.json";
 
-    /// What a pack claims to be. Always the current one: a build claiming an older format so that
-    /// older builds could still read it was a promise to packs that were never published, and the
-    /// version is still written down because reading one from a later build has to fail plainly.
+    /// What a pack claims to be, always the current one. Written down so that a pack from a later
+    /// build fails plainly rather than being read as though it were this one.
     public int FormatVersion { get; init; } = CurrentFormatVersion;
     public required string Id { get; init; }
     public required string Name { get; init; }
@@ -195,9 +194,9 @@ public sealed record PackManifest
     ///
     /// Said as one kind of trouble rather than two, because everything that reads a manifest — the
     /// editor listing workspaces, the builder, the applier opening a pack — already answers for a
-    /// manifest it cannot use, and a JsonException went past all of them. A workspace's manifest is
-    /// a file the author edits by hand, so a stray comma there is an ordinary event and not a
-    /// reason to take the window down.
+    /// manifest it cannot use, and a JsonException passes every one of them by. A workspace's
+    /// manifest is a file the author edits by hand, so a stray comma there is an ordinary event and
+    /// not a reason to take the window down.
     /// </exception>
     public static PackManifest Parse(string json)
     {

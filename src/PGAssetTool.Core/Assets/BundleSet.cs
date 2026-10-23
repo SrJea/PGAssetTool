@@ -89,11 +89,11 @@ public sealed class BundleSet : IDisposable
     /// Every bundle opened through here, so each is opened exactly once.
     ///
     /// Asking the manager for the same path twice does not reliably hand back the same instance,
-    /// and the second one is a second open file that disposing the manager did not close. Reading a
-    /// texture's pixels did exactly that — open for the object, open again for the stream the
-    /// pixels live in — and left the bundle locked after the reader was disposed. Every write to
-    /// the game closes the reader first and trusts that to be enough, so the effect was an install
-    /// that failed with the file in use whenever somebody had looked at that bundle first.
+    /// and the second one is a second open file that disposing the manager does not close. Reading
+    /// a texture's pixels is two asks — one for the object, one for the stream the pixels live in —
+    /// which left to itself leaves the bundle locked after the reader is disposed. Every write to
+    /// the game closes the reader first and trusts that to be enough, so a handle left behind is an
+    /// install that fails with the file in use whenever somebody has looked at that bundle first.
     private readonly Dictionary<string, BundleFileInstance> _opened = new(StringComparer.OrdinalIgnoreCase);
 
     private BundleFileInstance Bundle(string bundle)
@@ -111,8 +111,7 @@ public sealed class BundleSet : IDisposable
     }
 
     /// How many bytes of bundles this reader may hold unpacked in memory; see BundleUnpacker. What
-    /// does not fit is read from disk a block at a time, as everything was before. Zero unpacks
-    /// nothing.
+    /// does not fit is read from disk a block at a time. Zero unpacks nothing.
     public long UnpackBudget { get; init; }
 
     private long _unpacked;

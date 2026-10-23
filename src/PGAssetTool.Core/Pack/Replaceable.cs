@@ -9,10 +9,8 @@ namespace PGAssetTool.Core.Pack;
 /// showing. A type gains an entry only once its import path works end to end — listing one earlier
 /// would produce packs that fail when applied.
 ///
-/// Nothing else goes back. An asset's raw serialized bytes (`.dat`) once did, for any class, along with
-/// assets added to a bundle; the user retired both until there is a design worth rebuilding them on. A
-/// pack is pictures, models, sounds and animations, and nothing in it has to understand a class it
-/// cannot open.
+/// Nothing else goes back. A pack is pictures, models, sounds and animations, and nothing in it has
+/// to understand a class it cannot open.
 public static class Replaceable
 {
     private static readonly (AssetClassID Class, string Operation, string[] Formats)[] Kinds =
@@ -47,7 +45,7 @@ public static class Replaceable
     /// command line prints.
     ///
     /// References are still followed *through* these on the way to what they point at, so a texture
-    /// a component names is found exactly as before. It is the row itself that is not shown.
+    /// a component names is found exactly as any other. It is the row itself that is not shown.
     public static bool CanShow(AssetClassID cls) => !Withheld.Contains(cls);
 
     /// Why an operation naming this class is refused. Said the same way wherever it is said, so the

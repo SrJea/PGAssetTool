@@ -62,8 +62,8 @@ public class PreviewSoundTests
     [Fact]
     public void TheWaveHandedToThePlayerReadsBackAsTheSameSound()
     {
-        // What the player is given has to be a wave anything will take: the exporter used to write
-        // one that declared itself empty, and nothing noticed until it would not play.
+        // What the player is given has to be a wave anything will take. One that declares itself
+        // empty reads perfectly well and simply does not play.
         var clip = Clip(1000, channels: 2, frequency: 48000);
 
         var again = WaveFile.Parse(clip.ToWave(), "the preview");

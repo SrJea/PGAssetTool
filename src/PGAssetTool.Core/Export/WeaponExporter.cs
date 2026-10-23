@@ -20,10 +20,8 @@ public sealed record WeaponExport(
 /// An extract refused because a bundle it would read has been changed by something this copy of the
 /// tool has no original for. See WeaponExporter.Refuse.
 ///
-/// A class of its own so a caller can tell this refusal from a bug. Both were an
-/// InvalidOperationException, and the CLI reported an empty LINQ sequence inside the export as
-/// though it were this message's verdict on the game. Still one of those, so anything that caught
-/// the refusal by its old type goes on catching it.
+/// A class of its own so a caller can tell this refusal from a bug — an empty LINQ sequence inside
+/// the export is an InvalidOperationException too, and reads as this message's verdict on the game.
 public sealed class AlteredBundlesException(IReadOnlyList<string> bundles, string message)
     : InvalidOperationException(message)
 {
@@ -148,9 +146,9 @@ public sealed class WeaponExporter(BundleSet bundles)
         {
             // The shop icon is written once, into icon/, whichever route reaches it. Everything but
             // a weapon is found by its own id, and so is its icon — `OfferIcons/hat_chest_icon1_big`
-            // is among the related assets as well as being the icon — which wrote the one picture
-            // twice, as two files and two operations on the same asset. An author who edited one
-            // copy had the other put the original straight back over it, or not, by manifest order.
+            // is among the related assets as well as being the icon — so without this the one
+            // picture lands twice, as two files and two operations on the same asset, which a pack
+            // applies in whichever order its manifest lists them.
             if (tree.Icon?.AssetPath is { } icon
                 && string.Equals(related.Path, icon, StringComparison.OrdinalIgnoreCase)) continue;
 
@@ -235,8 +233,8 @@ public sealed class WeaponExporter(BundleSet bundles)
     /// Makes an edit to the weapon's own paint reach its default skin as well, so a pack looks the
     /// same to every player.
     ///
-    /// Without this, a re-skin showed only to players who had never touched the skins: the default
-    /// skin can paint with a texture of its own, and nothing the author edited was in it. The game
+    /// Without this, a re-skin shows only to players who have never touched the skins: the default
+    /// skin can paint with a texture of its own, and nothing the author edited is in it. The game
     /// has it both ways. #416's default skin draws with the weapon's own texture — the same asset —
     /// and needs nothing. #507's draws with a separate asset whose pixels are identical to the
     /// weapon's, so the one picture the author edits is written to both. Where the two pictures
@@ -408,16 +406,14 @@ public sealed class WeaponExporter(BundleSet bundles)
         // Which of a skin's materials lands in which slot is the renderer's business rather than the
         // skin's, so every submesh of that one mesh counts.
         //
-        // Held against every mesh at first, on the grounds that wide was the safe direction. It is
-        // not: a skin's material often paints with the weapon's own texture — 32 of the first 700
-        // weapons, #416 among them — and holding that texture against the arms as well kept the
-        // arms' UV island inside the gun's atlas, a region the gun never reads and which an author
-        // recognises on sight because it is arm-shaped.
+        // Not against every mesh: a skin's material often paints with the weapon's own texture —
+        // 32 of the first 700 weapons, #416 among them — and holding that texture against the arms
+        // as well keeps the arms' UV island inside the gun's atlas, a region the gun never reads
+        // and which an author recognises on sight because it is arm-shaped.
         var gun = tree.MeshTextures.FirstOrDefault(m => m.MeshPathId == tree.MainMesh?.PathId);
 
-        //
         // And only the skins that repaint. One that brings a model draws its paint on that model's
-        // UVs, not the gun's, and holding it against the gun cleared whatever the two did not
+        // UVs, not the gun's, and holding it against the gun clears whatever the two do not
         // share — which for a model of its own is most of the picture.
         if (gun is not null)
             foreach (var material in tree.Skins.Where(s => s.Model is null).SelectMany(s => s.Materials))
@@ -428,9 +424,9 @@ public sealed class WeaponExporter(BundleSet bundles)
                         Add(bundle, pathId, (gun.MeshPathId, slot));
                 }
 
-        // The model a skin brings, held against its own meshes. Without this a skin export masked
+        // The model a skin brings, held against its own meshes. Without this a skin export masks
         // nothing of the skin: no mesh the weapon has draws its paint, so every one of its textures
-        // was left whole — Ecko's Best Teammate's among them.
+        // would be left whole.
         if (brought is not null)
             foreach (var dressed in _dressing.OfModel(brought.Model.Bundle, brought.Assets))
                 for (var slot = 0; slot < dressed.BySubMesh.Count; slot++)
@@ -495,9 +491,9 @@ public sealed class WeaponExporter(BundleSet bundles)
     ///
     /// A weapon's clips are called after what they are for, and a prefab with two Animation
     /// components — the gun and a part that moves on its own — has two of each: two Shoots, two
-    /// Idles. Written by name, the second went over the first and the first was then in the manifest
-    /// under a file holding the other one's motion. Textures that share a name are left as they
-    /// always were; this is about clips, where it is the rule rather than the exception.
+    /// Idles. Written by name, the second goes over the first and leaves the first in the manifest
+    /// under a file holding the other one's motion. Textures that share a name are left alone; this
+    /// is about clips, where sharing a name is the rule rather than the exception.
     private static string? Distinct(List<ExportedAsset> written, AssetNode node, string folder)
     {
         if (node.Class != AssetClassID.AnimationClip) return null;
@@ -515,9 +511,9 @@ public sealed class WeaponExporter(BundleSet bundles)
     /// Records what was written, without listing the same file twice.
     ///
     /// One asset is reached by several routes — a texture four materials name, a mesh that both the
-    /// weapon and a skin's model use — and following each route wrote the same file to the same
-    /// path and added another row for it. What came out was right; what was listed was the same
-    /// picture four times over, in the editor and in the manifest behind it.
+    /// weapon and a skin's model use — and each route writes the same file to the same path. Listed
+    /// per route instead, one picture appears four times over, in the editor and in the manifest
+    /// behind it.
     private static void Once(List<ExportedAsset> into, IEnumerable<ExportedAsset> written)
     {
         foreach (var asset in written)
@@ -529,9 +525,9 @@ public sealed class WeaponExporter(BundleSet bundles)
     ///
     /// Everything the lookup table names for this weapon lands in Related, and most of it belongs
     /// to one skin: an offer icon, a profile animation and an info record per skin, plus each
-    /// skin's own definition. Writing the lot meant that extracting one weapon produced eight
-    /// offer icons and that asking for one skin produced the other seven as well — files an author
-    /// has no business changing to change the thing they asked for.
+    /// skin's own definition. Writing the lot gives one weapon eight offer icons, and one skin the
+    /// other seven as well — files an author has no business changing to change the thing they
+    /// asked for.
     ///
     /// Ownership is read off the name. A skin's assets are named after the skin's own id, so an
     /// asset whose name begins with one is that skin's and an asset whose name begins with none of
@@ -539,8 +535,8 @@ public sealed class WeaponExporter(BundleSet bundles)
     private static bool Wanted(WeaponTree tree, RelatedAsset related, WeaponSkinView? chosen)
     {
         // A skin's own model, which the skin export walks properly — everything it reaches, in the
-        // folders its types belong in. Taken by name here instead it came out as whatever else in
-        // that bundle happened to share the name, which for these was the skin's texture.
+        // folders its types belong in. Taken by name here it comes out as whatever else in that
+        // bundle shares the name, which for these is the skin's texture.
         if (related.Path.StartsWith("WeaponSkinsV2/CustomModels/", StringComparison.OrdinalIgnoreCase))
             return false;
 
@@ -662,7 +658,7 @@ public sealed class WeaponExporter(BundleSet bundles)
             //
             // Gathered before choosing, because MaxBy over a sequence of tuples throws on an empty
             // one rather than answering a default — and an item with no dressed mesh at all is
-            // ordinary outside the weapons. It took the whole extract down with it.
+            // ordinary outside the weapons.
             var dressed = tree.MeshTextures
                 .Select(slots => (Slots: slots, Mesh: ReadMesh(tree, slots.MeshPathId)))
                 .Where(m => m.Mesh is not null)
@@ -813,10 +809,11 @@ public sealed class WeaponExporter(BundleSet bundles)
 
     /// What the tool will know this mod by, for as long as it exists.
     ///
-    /// A name and a number would not do it. The id was the weapon's slug alone, so every mod of a
-    /// weapon was the same mod: installing a skin replaced the plain one, and installing somebody
-    /// else's replaced yours — silently, because replacing by id is exactly how a mod is updated.
-    /// Two mods of one weapon are two mods, whoever made them and whichever look they change.
+    /// A name and a number would not do it, and neither would the weapon's slug alone: that makes
+    /// every mod of a weapon the same mod, so installing a skin replaces the plain one and
+    /// installing somebody else's replaces yours — silently, because replacing by id is exactly how
+    /// a mod is updated. Two mods of one weapon are two mods, whoever made them and whichever look
+    /// they change.
     ///
     /// So each extraction mints its own. The readable half says what it is for at a glance; the
     /// last eight characters are what make it this one. It is written into the workspace once and
@@ -835,8 +832,8 @@ public sealed class WeaponExporter(BundleSet bundles)
 
     /// <param name="only">
     /// Which class to take, when the name alone is not enough. A skin's material and the texture it
-    /// paints with are routinely called the same thing, and without this the material was written
-    /// into the textures folder as well as its own.
+    /// paints with are routinely called the same thing, and without this the material lands in the
+    /// textures folder as well as its own.
     /// </param>
     private void ExportByName(
         string bundle, string name, string directory, List<ExportedAsset> into, List<string> skipped,
@@ -849,8 +846,8 @@ public sealed class WeaponExporter(BundleSet bundles)
         bool Named(AssetFileInfo i) => string.Equals(NameOf(file, i), name, StringComparison.OrdinalIgnoreCase);
 
         // Only the classes an export writes are worth asking the name of: a sprite or a material of
-        // the same name writes nothing, and asking every object in a bundle was most of what
-        // following a weapon's related assets cost. The rest are asked only to tell "not found"
+        // the same name writes nothing, and asking every object in a bundle is most of what
+        // following a weapon's related assets costs. The rest are asked only to tell "not found"
         // apart from "found, and nothing to write".
         var candidates = file.file.AssetInfos
             .Where(i => only is null || i.TypeId == (int)only)
@@ -868,16 +865,16 @@ public sealed class WeaponExporter(BundleSet bundles)
 
         // An object already written out by another route is not written again. A related path can
         // name a shop prefab that shares its name with the item's own texture — a glider's
-        // `Gliders_Shop/glider_aero_suit` beside its `glider_aero_suit` paint — and the search by name
-        // then wrote that texture a second time, as a second file and a second operation on the
-        // same asset, which a pack applied in whichever order its manifest happened to list them.
+        // `Gliders_Shop/glider_aero_suit` beside its `glider_aero_suit` paint — and the search by
+        // name then reaches that texture a second time, as a second file and a second operation on
+        // the same asset, which a pack applies in whichever order its manifest lists them.
         foreach (var info in matches.Where(i => !into.Any(a => a.Address.PathId == i.PathId
                      && string.Equals(a.Address.Container, bundle, StringComparison.OrdinalIgnoreCase))))
             Once(into, _exporter.Export(bundle, file, info, directory));
     }
 
-    /// The top-level name, as it always was here: a Shader answers with its empty `m_Name`, not the
-    /// one `AssetNaming` finds inside it.
+    /// The top-level name: a Shader answers with its empty `m_Name`, not the one `AssetNaming`
+    /// finds inside it.
     private string NameOf(AssetsFileInstance file, AssetFileInfo info)
         => info.TypeId == (int)AssetClassID.Shader
             ? bundles.Context.Deserialize(file, info)?["m_Name"] is { IsDummy: false } name ? name.AsString : ""

@@ -30,8 +30,8 @@ public class PackFileTests : IDisposable
     [Fact]
     public void APlainZipIsStillAPack()
     {
-        // Every pack built before this existed is one, and every pack built with protection off
-        // still is. Refusing to open them would have been a worse kind of protection.
+        // Every pack built with protection off is one, and refusing to open those would be a worse
+        // kind of protection than none.
         var path = Path("plain.pgmod");
         PackFile.Write(path, Zip(), signer: null, author: "");
 
@@ -163,9 +163,9 @@ public class PackFileTests : IDisposable
     public void BreakingASignatureDoesNotTurnAPackIntoAnUnsignedOne()
     {
         // The one thing an alteration must never be able to do is erase the evidence of itself.
-        // Anything that failed to decode used to come back as a plain unsigned zip, so a single
-        // character in the signature turned "changed since it was built" into "not signed" — a
-        // pack that read, installed, and raised nothing.
+        // Let anything that fails to decode come back as a plain unsigned zip and a single
+        // character in the signature turns "changed since it was built" into "not signed" — a pack
+        // that reads, installs, and raises nothing.
         using var me = PackAuthor.Mine(_home);
         var path = Path("broken.pgmod");
         PackFile.Write(path, Zip(), me, "mof22");
@@ -196,9 +196,9 @@ public class PackFileTests : IDisposable
     public void BytesAppendedToAPublicKeyDoNotBuyADifferentFingerprint()
     {
         // ImportSubjectPublicKeyInfo stops at the end of the structure and says nothing about what
-        // follows, while the fingerprint was taken over the whole array — so the same key, padded,
-        // verified every signature exactly as before under a fingerprint of somebody's choosing.
-        // A fingerprint that does not name the key it verifies with is worse than none.
+        // follows, so a fingerprint taken over the whole array lets the same key, padded, verify
+        // every signature under a fingerprint of somebody's choosing. A fingerprint that does not
+        // name the key it verifies with is worse than none.
         using var me = PackAuthor.Mine(_home);
         var padded = me.PublicKey.Concat(new byte[] { 1, 2, 3, 4 }).ToArray();
 

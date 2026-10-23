@@ -9,7 +9,7 @@ namespace PGAssetTool.Core.Preview;
 /// hundredths, each the difference from the one before; each rotation in 32 bits, three of them
 /// saying which component is left out and its sign, and the other three in 9, 10 and 10 bits; and a
 /// slope per key in however few bits its range needs. Read as if they were not there, those clips
-/// played as a model standing still — #15 Hammer's Idle among them.
+/// play as a model standing still — #15 Hammer's Idle among them.
 ///
 /// One slope a key, not two. Over every packed curve in the game the count of slopes is four times
 /// the count of keys without exception, so each key carries one slope for its four components, and

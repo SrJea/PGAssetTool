@@ -276,9 +276,10 @@ public class RetargetGunRootTests
         Assert.Equal(["ultimatum 1/FPS_PLAYER_Arm_Right/root/barrel_side"], result.Unmatched);
     }
 
-    /// #2 Shotgun's clips onto #416 Ultimatum, which fitted nothing at all: #416 keeps an arm inside
+    /// #2 Shotgun's clips onto #416 Ultimatum, which is the hard pairing: #416 keeps an arm inside
     /// its own arm, so two of its objects end in the right arm's name, and spells the left arm with
-    /// a small l. Both arms went unmatched, and with them everything matched from them.
+    /// a small l. Match either of those loosely and both arms go unmatched, and with them
+    /// everything matched from them.
     private static readonly string[] Shotgun =
     [
         "", "shotgun", "shotgun/Arms_Mesh", "shotgun/Arms_Mesh/Shotgun_Mesh", "shotgun/FPS_PLAYER_Arm_Left",

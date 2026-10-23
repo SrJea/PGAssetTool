@@ -71,10 +71,10 @@ public sealed partial class TreeNode(
 
     /// Whether the model behind this row has been asked for.
     ///
-    /// Kept apart from whether the row has anything under it, which is what used to stand in for
-    /// it. A skin can bring a model *and* paint the weapon, and such a row arrives with the paint
-    /// already beneath it — so "it has children, it must have been read" was wrong for exactly the
-    /// skins that have the most to show, and their models were never read at all.
+    /// Kept apart from whether the row has anything under it. A skin can bring a model *and* paint
+    /// the weapon, and such a row arrives with the paint already beneath it — so "it has children,
+    /// it must have been read" is wrong for exactly the skins that have the most to show, and their
+    /// models go unread.
     public bool ModelRead { get; set; }
 
     public bool HasChildren => Children.Count > 0 || Unread is not null;
@@ -176,9 +176,9 @@ public sealed partial class WeaponDetailViewModel : ObservableObject
             .OrderBy(g => Rank(g.Key))
             .ThenBy(g => g.Key.ToString(), StringComparer.Ordinal);
 
-        // Closed. Selecting a weapon used to unfold it into thirty-odd rows across four groups, and
-        // the thing anybody had come for — the model — is shown in the pane on its own now. What
-        // the tree is for is going looking, and going looking starts from a list of what there is.
+        // Closed: unfolded, selecting a weapon is thirty-odd rows across four groups, and the thing
+        // anybody came for — the model — is in the pane on its own anyway. What the tree is for is
+        // going looking, and going looking starts from a list of what there is.
         var prefab = new TreeNode(tree.Record.PrefabName, $"{tree.PrefabAssets.Count} objects",
             AssetClassID.GameObject);
 
@@ -234,10 +234,10 @@ public sealed partial class WeaponDetailViewModel : ObservableObject
             roots.Add(skins);
         }
 
-        // Filtered, this keeps the ones that resolved to something replaceable and drops the rest.
-        // The whole group used to go, on the strength of these being paths rather than objects —
-        // but a chat icon and a skin's shop icon are textures the extract writes out and a pack
-        // replaces, so what the filter promises to show was leaving out two of them per weapon.
+        // Filtered, this keeps the ones that resolved to something replaceable and drops the rest,
+        // rather than dropping the whole group on the strength of these being paths rather than
+        // objects: a chat icon and a skin's shop icon are textures the extract writes out and a
+        // pack replaces, which is two per weapon the filter would otherwise promise and leave out.
         var listed = replaceableOnly
             ? tree.Related.Where(r => r.Asset is not null).ToList()
             : tree.Related;

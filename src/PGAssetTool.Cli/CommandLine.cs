@@ -1,20 +1,20 @@
 namespace PGAssetTool.Cli;
 
 /// Something wrong with what was typed, as opposed to something wrong with the game or a file.
-/// Said with a pointer to --help and exit code 2, the way a usage error always was here.
+/// Said with a pointer to --help and exit code 2, as every usage error here is.
 public sealed class CommandLineException(string message) : Exception(message);
 
 /// What was typed, taken apart once.
 ///
-/// It used to be read in place: the command was whatever came first, the positional arguments
-/// whatever came after it up to the first option, and an option's value whatever followed its name.
-/// So `extract --skin Neon 819` extracted nothing, `--game D:\PG info` was an unknown command
-/// called `--game`, and a misspelt option — `--workpace` — was ignored without a word, which turned
-/// a request for a workspace into an extract with no manifest in it. Every one of those is a command
-/// that quietly does something other than what was asked.
+/// Every option is one of a known set, either taking a value or not; anything else beginning with
+/// `--` is refused by name; and options and positional arguments may come in any order.
 ///
-/// So every option is one of a known set, either taking a value or not; anything else beginning
-/// with `--` is refused by name; and options and positional arguments may come in any order.
+/// Read in place instead — the command whatever comes first, the positional arguments whatever
+/// comes after it up to the first option, an option's value whatever follows its name — and
+/// `extract --skin Neon 819` extracts nothing, `--game D:\PG info` is an unknown command called
+/// `--game`, and a misspelt option such as `--workpace` is ignored without a word, which turns a
+/// request for a workspace into an extract with no manifest in it. Every one of those is a command
+/// that quietly does something other than what was asked.
 public sealed class CommandLine
 {
     /// The options that take a value, as `--name value` or `--name=value`.
@@ -134,7 +134,7 @@ public sealed class CommandLine
         if (Positional.Count == 0)
             throw new CommandLineException($"{Command} needs {what}.");
 
-        // Said rather than dropped. The second word was most often the rest of an id with a space
+        // Said rather than dropped. The second word is most often the rest of an id with a space
         // in it — the game has one, `avatar_ programmer` — and taking the first half of it on its
         // own answers a question nobody asked.
         if (Positional.Count > 1)

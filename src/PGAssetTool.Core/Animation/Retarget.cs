@@ -28,7 +28,7 @@ namespace PGAssetTool.Core.Animation;
 ///    that gun happens to be made of, and #416's barrel is not #1's magazine. Only when the
 ///    clip's own model is known: counted among the paths a clip moves rather than the objects the
 ///    model has, a hand moving its trigger and nothing else it holds looks like a hand holding one
-///    thing, and the trigger was matched with the other gun's root.
+///    thing, and the trigger lands on the other gun's root.
 ///
 /// Names are compared without minding case, every step: #2 has `FPS_PLAYER_Arm_Left` where #416 has
 /// `FPS_PLAYER_Arm_left`, and they are the same arm. What a curve is moved onto is always spelt the
@@ -143,7 +143,7 @@ public static class Retarget
     ///
     /// Copied as numbers, a clip puts each object where the other weapon has it, and no two weapons
     /// stand their objects alike. #416 bends its right arm through an arm inside it and its gun's root
-    /// is turned a quarter from #2's, so #2's idle stood #416 on end with its arm crossed through it.
+    /// is turned a quarter from #2's, so #2's idle stands #416 on end with its arm crossed through it.
     /// So what is taken from the other clip is the change from that weapon's own rest, seen from above
     /// both — from the object both components hang off, which for a weapon is the camera — and it is
     /// put on top of this weapon's own rest. Between two rigs that stand alike, that is the numbers.

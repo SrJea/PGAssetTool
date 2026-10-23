@@ -80,7 +80,13 @@ public sealed class GameCatalogs
         ["l_zh-cht"] = "繁體中文",
     };
 
-    public static GameCatalogs Load(BundleSet bundles, string language = DefaultLanguage)
+    /// <param name="remember">
+    /// A directory the name tables may be kept in between runs — a tool's own data folder. Reading
+    /// all eleven of the game's is 355ms of the 930 a window waits before it has a list, and they
+    /// change only when the game does. Null reads them every time. See WeaponNames.
+    /// </param>
+    public static GameCatalogs Load(
+        BundleSet bundles, string language = DefaultLanguage, string? remember = null)
     {
         var catalogs = new GameCatalogs(
             ItemCatalog.Load(bundles),
@@ -89,14 +95,14 @@ public sealed class GameCatalogs
             SkinCatalog.Load(bundles),
             GearCatalog.Load(bundles));
 
-        catalogs.Names = WeaponNames.Load(bundles, catalogs.Items);
+        catalogs.Names = WeaponNames.Load(bundles, catalogs.Items, remember);
         return catalogs;
     }
 
     /// The same registries read again in another language.
     ///
     /// Only the translation table depends on the language; the items, the lookup table, the skins
-    /// and the search index do not. Rebuilding all of them to change which name is displayed cost
+    /// and the search index do not. Rebuilding all of them to change which name is displayed costs
     /// the better part of a second for no reason.
     public GameCatalogs WithLanguage(BundleSet bundles, string language)
         => new(Items, Lookup, Localization.Load(bundles, language), Skins, Gear) { Names = Names };

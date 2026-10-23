@@ -21,8 +21,8 @@ internal static class Program
             return SelfTest.Run(at >= 0 && at + 1 < args.Length ? args[at + 1] : null);
         }
 
-        // Whatever gets this far takes the window down, and until now took with it everything that
-        // said why. The report is what somebody can be asked to send; the next start points at it.
+        // Whatever gets this far takes the window down, and with it everything that would say why.
+        // The report is what somebody can be asked to send; the next start points at it.
         AppDomain.CurrentDomain.UnhandledException += (_, e) =>
             Core.Settings.ErrorLog.Crash(
                 e.ExceptionObject as Exception ?? new Exception(e.ExceptionObject?.ToString()),

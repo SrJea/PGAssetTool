@@ -418,9 +418,9 @@ public sealed partial class ManagerViewModel : ObservableObject
     /// Notices the game being started or closed while the tool is open.
     ///
     /// The buttons on this tab, and what the editor will let through, both turn on whether the game
-    /// holds its bundles open — and that was read once, when the tab last did a full refresh. Start
-    /// the game afterwards and everything went on offering to write to it; close it and everything
-    /// went on refusing.
+    /// holds its bundles open. Read once, at the tab's last full refresh, that answer goes stale:
+    /// start the game afterwards and everything goes on offering to write to it; close it and
+    /// everything goes on refusing.
     ///
     /// The cheap question is asked on a timer and the expensive one only when the answer moves: a
     /// refresh re-reads the ledger and every bundle a mod claims, which is not a thing to do every

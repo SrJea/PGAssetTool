@@ -109,10 +109,10 @@ public static class Workspace
     /// A directory to extract into that is not already somebody's workspace, numbering up until it
     /// finds one.
     ///
-    /// Extracting wrote to a name made from the weapon and the skin, so asking for the same one
-    /// twice wrote over the first: the files an author had edited, and the manifest that said which
-    /// mod their work was. Two mods of one weapon are two mods — the id has said so since it began
-    /// being minted per extraction — and two workspaces are two directories for the same reason.
+    /// An extract's directory is named after the item and the skin, so asking for the same one
+    /// twice would write over the first: the files an author has edited, and the manifest that says
+    /// which mod their work is. Two mods of one weapon are two mods — the id is minted per
+    /// extraction — and two workspaces are two directories for the same reason.
     ///
     /// The manifest is what makes a directory somebody's rather than merely present: an empty
     /// folder, or one holding something else entirely, is not a workspace and is not stepped over.
@@ -133,9 +133,9 @@ public static class Workspace
     /// The same operation written down more than once is one operation.
     ///
     /// One asset is reached by several routes — a texture four materials name, a mesh that both the
-    /// weapon and a skin's model use — and an export that follows each route added a row for each.
-    /// The file written was right, and the same file every time; what was wrong was the list. Here
-    /// as well as at the export, because the manifests already on disk have it written into them.
+    /// weapon and a skin's model use — and following each route adds a row for each: the same file,
+    /// listed once per route. Here as well as at the export, because manifests already on disk
+    /// carry those rows.
     private static PackManifest Once(PackManifest manifest)
     {
         var seen = new HashSet<(string Op, string Source, Assets.AssetAddress Target)>();

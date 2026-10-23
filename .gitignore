@@ -5,6 +5,7 @@ obj/
 .idea/
 *.user
 CLAUDE.md
+NOTES.md
 
 # Local index cache and mod working directories
 *.db

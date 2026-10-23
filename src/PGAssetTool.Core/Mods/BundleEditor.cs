@@ -84,9 +84,9 @@ public sealed class BundleEditor : IDisposable
     /// The compressing itself is BundlePacker's, not the library's, because the library's is the
     /// single slowest thing this tool does.
     ///
-    /// The entries are laid end to end straight into the buffer the blocks are cut from. This used
-    /// to write the whole bundle out uncompressed into memory and read that back to pack it, which
-    /// held the largest bundle in the game — 216MB — five or six times over while it did.
+    /// The entries are laid end to end straight into the buffer the blocks are cut from. Written out
+    /// uncompressed into memory and read back to be packed instead, the largest bundle in the game —
+    /// 216MB — is held five or six times over while it goes.
     public void Save(string outputPath, BundlePacking packing = BundlePacking.Smaller)
     {
         var original = _bundle.file.BlockAndDirInfo;

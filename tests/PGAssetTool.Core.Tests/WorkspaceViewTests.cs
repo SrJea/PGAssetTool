@@ -225,8 +225,8 @@ public class WorkspaceViewTests : IDisposable
     }
 
     /// pgmod.json is a file the author edits by hand, so a stray comma in one is an ordinary event.
-    /// It used to come back as a JsonException, which is not what anything reading a manifest
-    /// answers for — the editor listing workspaces let it past and the window went with it.
+    /// A JsonException is not what anything reading a manifest answers for — the editor listing
+    /// workspaces lets it past, and the window goes with it.
     [Fact]
     public void AManifestThatIsNotJsonIsSaidToBeUnreadableRatherThanThrownRaw()
     {

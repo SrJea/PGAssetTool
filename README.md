@@ -20,14 +20,14 @@ Everything to do with the game's assets, made simple.
 |---------|------|--------------------|
 | Weapons | ✅️ | |
 | Weapon skins | ✅️ | |
-| Hats | ✅️ | Their skins are drawn with the hat's own textures, so editing the hat changes both |
-| Masks | ✅️ | As hats |
-| Avatars | ✅️ | |
-| Capes | ✅️ | As hats |
-| Boots | ✅️ | As hats |
-| Gliders | ✅️ | |
-| Transports | ✅️ | |
-| Pets | ✅️ | |
+| Hats | ⚠️ | Not recommended, not supported — now in the window as well as the CLI |
+| Masks | ⚠️ | Not recommended, not supported — now in the window as well as the CLI |
+| Avatars | ⚠️ | Not recommended, not supported — now in the window as well as the CLI |
+| Capes | ⚠️ | Not recommended, not supported — now in the window as well as the CLI |
+| Boots | ⚠️ | Not recommended, not supported — now in the window as well as the CLI |
+| Gliders | ⚠️ | Not recommended, not supported — now in the window as well as the CLI |
+| Transports | ⚠️ | Not recommended, not supported — now in the window as well as the CLI |
+| Pets | ⚠️ | Not recommended, not supported — now in the window as well as the CLI |
 | Gadgets | ❌️ | Planned |
 | Buttons and other UI | ❌️ | Planned |
 | Hat skins | ❌️ | Planned |
@@ -83,7 +83,8 @@ dotnet publish src/PGAssetTool.Gui -c Release -o dist
 ## The three tabs
 
 **Browse** - The list of items of whichever kind the picker above it shows — weapons, hats, capes, masks, boots,
-pets, gliders, transports or avatars — and a tree of the data the selected one refers to.\
+pets, gliders, transports or avatars — and a tree of the data the selected one refers to.
+See the table above for how far the kinds other than weapons are supported.\
 Search weapons by the number in the in-game gallery, by the weapon's name in any language, or by its internal
 number; anything else by its name or its id.\
 In the data tree, the shortcut `Ctrl+Shift+R` switches to a simpler view.

@@ -42,8 +42,11 @@ in it has a concept of a weapon.
 holding them, `IconResolver` finds the one picture that stands for an item. This layer answers
 "what exists, and where".
 
-**The shell** — the GUI and the CLI — puts the two together. Both offer every kind; the picker above the
-window's list chooses which registry the list is filled from, and nothing below it changes.
+**The shell** — the GUI and the CLI — puts the two together. The window offers every kind the game
+has something in, weapons first and selected; it offered weapons alone until 2026-10-02, by one
+filter where it loads the catalogues, while the CLI read them the whole time.
+The picker above the window's list chooses which registry the list is filled from, and nothing
+below it changes.
 
 Adding another kind of item is work in the middle layer. The layers below and above it already do
 what they would need to do.
@@ -82,12 +85,14 @@ chat icon and a skin's shop icon when it is filtered to what can be replaced. Be
 group went, on the strength of their being paths rather than objects — while an extract wrote them
 out and a pack replaced them.
 
-The item's own prefab is found the same way, and a search by name is only the fallback. A pet's
-bundle holds `Pets/Content/pet_alien_cat`, the model, and `Pets/Infos/pet_alien_cat`, a description of
-it, and both GameObjects are called `pet_alien_cat`; searched for by name, 50 of the 112 pets resolved
-to the description — a GameObject and a Transform, no model — and three weapons and eighteen vehicles
-to a part of themselves that reached less than the whole.
-
+**An item's own prefab is found the same way**, and for the same reason. It used to be found by the
+leaf of the path that matched, and a name is not unique inside a bundle: 158 of the game's 2,624
+items have more than one object of their own name, and for 69 of them the search landed on one with
+no model. Every pet that appeared to be an empty stub was this — `pt_pet_wolf` holds the real
+`pet_wolf` under `Pets/Content/pet_wolf` and an empty one under `Pets/Infos/pet_wolf` — along with
+three weapons that were quietly short of a mesh. Of the 158 where the two answers differ, 69 gain a
+model, 88 reach the same meshes through another copy of the same object, and one reaches fewer; the
+table wins there too, because it is what the game loads and the name was a guess.
 ### An item's related paths are the ones no other item claims
 
 Everything but a weapon finds its related assets by its id appearing in their names, ending where the
@@ -200,12 +205,12 @@ what the game plays it by, and its events call into the game's code.
 
 **A clip always keeps the length the game shipped it with.** The game times a weapon by its clips —
 how long a shot takes, how long a reload takes (`shotDelayForAnimation`, `GetReloadAnimationSpeed`
-in its metadata) — so another length is another fire rate: #2's 0.67s shot in #416's 2.60s one made
-#416 fire four times as often. That is a cheat whether meant or not. So `ClipImporter.Fit` stretches
-or squeezes whatever motion comes in to end where the game's clip ends — times scaled, slopes by the
-inverse, the same curve at another speed — and a legacy clip's length is its last key. It is done on
-the way into the bundle, so it holds for every pack, including ones built before it; the workspace
-is fitted too when an animation is put in, so the preview shows what the game will play.
+in its metadata) — so another length is another weapon, which reaches other players and is a cheat
+whether meant or not. So `ClipImporter.Fit` stretches or squeezes whatever motion comes in to end
+where the game's clip ends — times scaled, slopes by the inverse, the same curve at another speed —
+and a legacy clip's length is its last key. It is done on the way into the bundle, so it holds for
+every pack however it was built; the workspace is fitted too when an animation is put in, so the
+preview shows what the game will play.
 
 What goes in is one of two things.
 

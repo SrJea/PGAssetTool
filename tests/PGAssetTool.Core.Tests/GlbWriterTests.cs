@@ -298,8 +298,9 @@ public class GlbWriterTests : IDisposable
     public void SubmeshesSharingAVertexBufferComeBackSharingIt()
     {
         // Every submesh of a Unity mesh indexes the one vertex buffer, and that is how it is written
-        // out. Read back a primitive at a time, each submesh brought its own copy of the vertices:
-        // #1200's Space Dessert went back into the game with twice the vertices it came out with.
+        // out. Read back a primitive at a time, each submesh brings its own copy of the vertices:
+        // #1200's Space Dessert then goes back into the game with twice the vertices it came out
+        // with.
         var mesh = Triangle() with
         {
             VertexCount = 4,

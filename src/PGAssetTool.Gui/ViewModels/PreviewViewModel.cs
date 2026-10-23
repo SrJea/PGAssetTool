@@ -88,11 +88,71 @@ public sealed partial class PreviewViewModel(AlphaPreference? alpha = null) : Ob
 
     private Skeleton? _skeleton;
 
+    /// The other meshes of the same prefab, each with the skeleton that places it — the arms a
+    /// weapon is held in, above all.
+    ///
+    /// Kept beside the model rather than joined to it once, because a clip has to move them: they
+    /// are posed one by one and joined again every frame. Joining them once and posing the result
+    /// cannot work, since blend indices count against a bone list belonging to one mesh.
+    ///
+    /// Empty is the ordinary case, and the one the rest of this file was written for.
+    private IReadOnlyList<(UnityMesh Mesh, Skeleton Skeleton, bool Frames)> _with = [];
+
+    /// What the view is framed by: the model itself, never what it is held in. Framing by the pair
+    /// would shrink every weapon to make room for a forearm reaching out of the picture.
+    [ObservableProperty] private UnityMesh? _framing;
+
+    /// What the view is framed by with nothing playing, kept so that putting a clip down puts the
+    /// frame back where it was.
+    private UnityMesh? _resting;
+
+    /// How many of the submeshes on screen belong to the model on the row rather than to the parts
+    /// shown beside it. The model's come first in the join, so these are the first this many.
+    ///
+    /// What it answers: a texture chosen by hand covers the model and not the arms, and anything
+    /// asking what this mesh is wearing means these.
+    [ObservableProperty] private int _own = 1;
+
+    /// Whether anything shown carries an outline shell, which the join itself no longer says.
+    /// Null when there is nothing beside the model and the mesh can answer for itself.
+    [ObservableProperty] private bool? _shelled;
+
+    /// The model and everything shown with it, at one moment, in the prefab's own space. Null when
+    /// there is nothing to show it with, which leaves every other path exactly as it was.
+    ///
+    /// Each part is posed by its own skeleton — its bones, its bind poses — and they are joined
+    /// afterwards. `Placed` rather than `Pose` because the two have only the prefab's space in
+    /// common; see Skeleton.Placed.
+    /// <param name="framing">
+    /// Leave out the parts that do not size the view — the arms. See MainViewModel.Held.
+    /// </param>
+    private UnityMesh? Built(Motion? motion, float time, bool framing = false)
+    {
+        if (_with.Count == 0 || _skeleton is null || _authored is null) return null;
+
+        var parts = new List<UnityMesh> { _skeleton.Placed(_authored, motion, time) };
+        foreach (var (mesh, skeleton, frames) in _with)
+            if (!framing || frames)
+                parts.Add(skeleton.Placed(mesh, motion, time));
+
+        if (UnityMesh.Combined(_authored.Name, parts) is not { } joined) return null;
+
+        // Joined in the prefab's space, which is the only one the parts share, and then taken back
+        // into the model's own — where everything else that reads a model reads it. A weapon's
+        // facing is worked out against landmarks that answer in the model's space
+        // (`Facing.LandmarksIn`), so measured against a model left in the prefab's the muzzle came
+        // out at whichever end the two happened to agree on, which is why it moved from weapon to
+        // weapon with the arms turned on.
+        return _skeleton.Home(_authored) is { } home ? Skeleton.Moved(joined, home) : joined;
+    }
+
     /// What a model can be made to do, if anything.
-    private void Dress(Skeleton? skeleton, IReadOnlyList<Motion>? motions)
+    private void Dress(Skeleton? skeleton, IReadOnlyList<Motion>? motions,
+        IReadOnlyList<(UnityMesh Mesh, Skeleton Skeleton, bool Frames)>? with = null)
     {
         Stop();
         _skeleton = skeleton;
+        _with = with ?? [];
         _unposable = false;
         Clips.Clear();
 
@@ -110,11 +170,71 @@ public sealed partial class PreviewViewModel(AlphaPreference? alpha = null) : Ob
     {
         Time = 0;
         OnPropertyChanged(nameof(Length));
+        Framing = Room(value?.Motion) ?? _resting;
         Pose();
 
         // Choosing one is asking to see it. Stopping is the button beside it.
         if (value is not null) Playing = true;
         else Playing = false;
+    }
+
+    /// Room enough for the whole of a clip, so that what it does stays on screen.
+    ///
+    /// A model is framed by where it sits at rest, and most clips barely leave it — measured over
+    /// 1,150 of them, the middle one carries the model a twelfth of its own radius and nine in ten
+    /// stay inside one. The rest really do travel: #8's knife swings two and a half radii out as it
+    /// strikes, #122's bow three and a half, #147's dual shotguns nearly nine as they reload. Framed
+    /// by the rest pose, those leave the picture and come back.
+    ///
+    /// So the clip is sampled and the frame made big enough for all of it. Eight steps and the ends:
+    /// what is being measured is where the model gets to, and a corner of that is not missed by a
+    /// twelfth of a second. The answer is a box because a frame is only ever asked for its bounds.
+    private UnityMesh? Room(Motion? motion)
+    {
+        if (motion is null || _skeleton is null || _authored is null || _resting is null) return null;
+
+        float lx = float.MaxValue, ly = float.MaxValue, lz = float.MaxValue;
+        float hx = float.MinValue, hy = float.MinValue, hz = float.MinValue;
+
+        for (var step = 0; step <= 8; step++)
+        {
+            var at = motion.Length * step / 8f;
+            UnityMesh posed;
+            try { posed = Built(motion, at, framing: true) ?? _skeleton.Pose(_authored, motion, at); }
+            catch (Exception e) when (e is IndexOutOfRangeException or ArgumentOutOfRangeException
+                                          or KeyNotFoundException or InvalidOperationException)
+            {
+                return null;
+            }
+
+            var box = MeshBounds.Of(posed);
+            lx = MathF.Min(lx, box.Centre.X - box.Size.X / 2);
+            ly = MathF.Min(ly, box.Centre.Y - box.Size.Y / 2);
+            lz = MathF.Min(lz, box.Centre.Z - box.Size.Z / 2);
+            hx = MathF.Max(hx, box.Centre.X + box.Size.X / 2);
+            hy = MathF.Max(hy, box.Centre.Y + box.Size.Y / 2);
+            hz = MathF.Max(hz, box.Centre.Z + box.Size.Z / 2);
+        }
+
+        if (hx < lx) return null;
+
+        float[] corners =
+        [
+            lx, ly, lz,  hx, ly, lz,  lx, hy, lz,  hx, hy, lz,
+            lx, ly, hz,  hx, ly, hz,  lx, hy, hz,  hx, hy, hz,
+        ];
+
+        return new UnityMesh
+        {
+            Name = "room",
+            VertexCount = 8,
+            Attributes = new Dictionary<VertexAttribute, float[]> { [VertexAttribute.Position] = corners },
+            Dimensions = new Dictionary<VertexAttribute, int> { [VertexAttribute.Position] = 3 },
+            Indices = [],
+            SubMeshes = [],
+            BindPoses = [],
+            BoneNameHashes = [],
+        };
     }
 
     partial void OnTimeChanged(double value) => Pose();
@@ -187,7 +307,8 @@ public sealed partial class PreviewViewModel(AlphaPreference? alpha = null) : Ob
 
         try
         {
-            Mesh = _skeleton.Pose(_authored ?? rest, Clip.Motion, (float)Time);
+            Mesh = Built(Clip.Motion, (float)Time)
+                ?? _skeleton.Pose(_authored ?? rest, Clip.Motion, (float)Time);
         }
         catch (Exception e) when (e is IndexOutOfRangeException or ArgumentOutOfRangeException
                                       or KeyNotFoundException or InvalidOperationException)
@@ -305,8 +426,8 @@ public sealed partial class PreviewViewModel(AlphaPreference? alpha = null) : Ob
         Nothing = null;
 
         // What the asset is, until somebody says otherwise — and then what they said, for every
-        // picture after it. Resetting to the automatic answer each time meant an icon came back with
-        // its alpha honoured however many times it had just been turned off.
+        // picture after it. Reset to the automatic answer each time, an icon comes back with its
+        // alpha honoured however many times it has just been turned off.
         var wanted = _alpha.Chosen ?? alphaIsCoverage;
 
         // Assigning the property redraws through its change handler, but only when the value moves.
@@ -330,9 +451,10 @@ public sealed partial class PreviewViewModel(AlphaPreference? alpha = null) : Ob
     /// </param>
     public void Show(UnityMesh mesh, string caption, IReadOnlyList<PreviewImage?>? textures,
         string? subject = null, Skeleton? skeleton = null, IReadOnlyList<Motion>? motions = null,
-        MeshRenderer.Basis? standing = null)
+        MeshRenderer.Basis? standing = null,
+        IReadOnlyList<(UnityMesh Mesh, Skeleton Skeleton, bool Frames)>? with = null)
     {
-        Dress(skeleton, motions);
+        Dress(skeleton, motions, with);
         _subject = subject;
         var seen = subject is not null && _views.TryGetValue(subject, out var before) ? before : null;
 
@@ -344,7 +466,19 @@ public sealed partial class PreviewViewModel(AlphaPreference? alpha = null) : Ob
         // Shown put together the way its bones put it together, and kept as it was written for the
         // posing: a clip carries the bones' own transforms already. See Skeleton.Assembled.
         _authored = mesh;
-        Rest = skeleton?.Assembled(mesh) ?? mesh;
+
+        // With something to be held in, the whole of it moves into the prefab's own space, that
+        // being the only space the two share. Framed by the model alone either way.
+        Own = Math.Max(mesh.SubMeshes.Count, 1);
+        Shelled = _with.Count == 0 ? null
+            : mesh.CarriesAnOutline || _with.Any(w => w.Mesh.CarriesAnOutline);
+        Framing = _resting = skeleton?.Assembled(mesh) ?? mesh;
+        if (Built(null, 0f) is { } together && skeleton is not null)
+            (Rest, Framing, _resting) = (together,
+                Built(null, 0f, framing: true) ?? skeleton.Placed(mesh, null, 0f),
+                Built(null, 0f, framing: true) ?? skeleton.Placed(mesh, null, 0f));
+        else
+            Rest = Framing;
         Mesh = Rest;
         Standing = standing;
         MeshTextures = textures;
@@ -393,12 +527,24 @@ public sealed partial class PreviewViewModel(AlphaPreference? alpha = null) : Ob
         Remember();
     }
 
-    /// Covers the whole model with one texture, which is the point: the question it answers is what
-    /// this mesh looks like wearing a different skin, and a skin is not per-submesh.
+    /// Covers the model with one texture, which is the point: the question it answers is what this
+    /// mesh looks like wearing a different skin, and a skin is not per-submesh.
+    ///
+    /// **The model, and not what is shown beside it.** The parts of an item keep their own pictures:
+    /// a weapon's skin is cut for the weapon, and painted over the arms as well it is a smear of
+    /// the gun's paint where the hands should be. The model's submeshes come first in the
+    /// join, so they are the ones at the front of this list.
     public void Wear(PreviewImage picture)
-        => MeshTextures = Enumerable
-            .Repeat<PreviewImage?>(picture, Math.Max(Mesh?.SubMeshes.Count ?? 1, 1))
+    {
+        var mine = Math.Max(Own, 1);
+        var all = Math.Max(Mesh?.SubMeshes.Count ?? mine, mine);
+
+        MeshTextures = Enumerable.Range(0, all)
+            .Select(at => at < mine
+                ? picture
+                : _automatic is { } worn && at < worn.Count ? worn[at] : null)
             .ToList();
+    }
 
     private IReadOnlyList<PreviewImage?>? _automatic;
 
@@ -432,13 +578,6 @@ public sealed partial class PreviewViewModel(AlphaPreference? alpha = null) : Ob
     }
 }
 
-/// A texture offered for a mesh preview: what it is called and where to find it, and nothing else.
-///
-/// Deliberately without the decoded picture. It used to carry one, filled in once the texture had
-/// been read — but a record is compared by its contents, so the filled-in copy was a different value
-/// from the one in the list the combo box was showing. The combo box, asked to select something it
-/// did not have, selected nothing instead, and the model went straight back to the texture it
-/// started with. Picking a skin appeared to do nothing at all.
 /// A named way of facing a model. Which way it faces and how it is tilted: the rest of the camera
 /// is the framing, which belongs to whoever set it.
 public sealed record ViewPreset(string Name, float Yaw, float Pitch, float Roll = 0f)
@@ -454,6 +593,12 @@ public sealed record MotionChoice(Motion Motion)
     public override string ToString() => Motion.Name;
 }
 
+/// A texture offered for a mesh preview: what it is called and where to find it, and nothing else.
+///
+/// Deliberately without the decoded picture. A record is compared by its contents, so a copy
+/// carrying one, filled in once the texture has been read, is a different value from the one in the
+/// list the combo box is showing — and a combo box asked to select something it does not have
+/// selects nothing instead, which puts the model straight back into the texture it started with.
 public sealed record TextureChoice(string Name, string Bundle, long PathId)
 {
     /// True for a texture the mesh in front of you is actually drawn with, which the list marks so

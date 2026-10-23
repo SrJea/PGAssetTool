@@ -20,10 +20,11 @@ public sealed record Relocated(string? Bundle, string Hash);
 /// Following an asset the game has moved from one bundle into another.
 ///
 /// The game reshuffles which bundle holds what between versions and keeps the objects themselves as
-/// they were. Every pack kept in this tool was measured against 24.3.7: of the twenty operations that
-/// did not apply there, nineteen named an asset that was in another bundle under the same path id —
-/// ecw_6's textures in ecw_4, d_w's in bhlw — and seventeen of those were the same picture to the
-/// pixel. An address looks inside the bundle it names and nowhere else, so all nineteen failed.
+/// they were. Measured over every pack kept in this tool against 24.3.7: of the twenty operations
+/// that do not apply there, nineteen name an asset that is in another bundle under the same path id
+/// — ecw_6's textures in ecw_4, d_w's in bhlw — and seventeen of those are the same picture to the
+/// pixel. An address looks inside the bundle it names and nowhere else, so all nineteen fail without
+/// this.
 ///
 /// Where to look is the one thing the operation cannot say, and the pack's subject can: the item it
 /// is for, whose bundles in this version are what the resolver finds for it. The asset still has to

@@ -89,12 +89,11 @@ public sealed class GameInstallation
 
         // And everything the downloaded cache claims that the shipped manifest does not name.
         //
-        // **The two are not the same list and the shipped one is not the longer.** The game updated
-        // on 2026-10-15 and moved most of its bundles into the player's profile: 90 names were left
-        // in `embedded_asset_bundles.json` and 816 are claimed in `Cache/Info/names`. Resolving a
-        // bundle already preferred the downloaded copy, but every list of what the game *has* came
-        // from the shipped manifest alone — so eight hundred bundles were simply not there, and
-        // anything in one answered "'bhlw' is not in the bundle manifest".
+        // **The two are not the same list and the shipped one is not the longer.** The game refiles
+        // bundles into the player's profile as it pleases, and most of them are there: 90 names are
+        // left in `embedded_asset_bundles.json` against 816 claimed in `Cache/Info/names`. A list
+        // of what the game *has* that reads the shipped manifest alone is short by eight hundred
+        // bundles, and anything in one of them answers "'bhlw' is not in the bundle manifest".
         //
         // The shipped entry wins where both name a bundle, since that hash is the one the game
         // recorded for it; the downloaded cache's own hash is in the path `Resolve` returns.

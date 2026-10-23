@@ -113,7 +113,7 @@ public sealed class ModStore
     public string Root { get; }
 
     /// Installed packs, copied here so the ledger never points at wherever an author happened to
-    /// build one. Deleting a workspace used to leave an installed mod with no file to reapply from.
+    /// build one: deleting a workspace would leave an installed mod with no file to reapply from.
     public string ModsDirectory => Path.Combine(Home, "mods");
     public string BackupRoot { get; }
     private string StatePath => Path.Combine(Root, StateFileName);
@@ -228,7 +228,7 @@ public sealed class ModStore
 
         foreach (var cacheDirectory in Directory.GetDirectories(BackupRoot))
         {
-            // An older layout filed backups directly under the bundle name, with no cache segment.
+            // One directory per cache, and nothing else under the backup root is a backup.
             if (!Enum.TryParse<CacheKind>(Path.GetFileName(cacheDirectory), ignoreCase: true, out var cache))
                 continue;
 
@@ -245,7 +245,7 @@ public sealed class ModStore
     /// Takes a copy of a pack so installing it does not depend on the file staying where it was.
     ///
     /// A pack built into a workspace is one deletion away from leaving an installed mod that cannot
-    /// be reapplied or removed cleanly — which happened, and cost an uninstall to recover from.
+    /// be reapplied or removed cleanly.
     public string Keep(string packPath, Pack.PackSubject? subject = null)
     {
         // Already here: reinstalling from the copy must not spiral into copies of copies.
@@ -374,8 +374,8 @@ public sealed class ModStore
     /// Usually the hash it is filed under, since a cache directory is named after its bundle's MD5 —
     /// but not for a bundle that was already modified when it was backed up, which is what a forced
     /// install of a game modded by something else leaves. Asked whether a live bundle is the one the
-    /// backup would put back, the name then says no every time, and every reconcile copied that
-    /// bundle over an identical copy of itself and said it had put it back.
+    /// backup would put back, the name says no every time, so every reconcile copies that bundle
+    /// over an identical copy of itself and reports that it put it back.
     ///
     /// Hashed once and kept beside the backup, with the size and time it was taken from, so a
     /// reconcile does not read every backup through to answer it. Null when there is no backup.

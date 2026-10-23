@@ -20,8 +20,8 @@ public static class UvCoverage
     /// only be the tool disagreeing with them. Anything filtered or mipped does read its neighbour,
     /// and one texel covers that.
     ///
-    /// It was a flat two before this was looked at, which on a 64x64 texture nearly doubled what the
-    /// mask claimed: 65% of #16's atlas against the 37% its model actually reads.
+    /// A flat two instead nearly doubles what the mask claims on a 64x64 texture: 65% of #16's
+    /// atlas against the 37% its model actually reads.
     public static int MarginFor(int filterMode, int mipCount)
         => filterMode == 0 && mipCount <= 1 ? 0 : 1;
 
@@ -33,7 +33,7 @@ public static class UvCoverage
     /// A coordinate sitting exactly on a texel boundary belongs, as far as arithmetic goes, to the
     /// texel on the far side of it — and pixel-art UVs land on boundaries constantly, an island
     /// ending at exactly 16/64 rather than at 15.99. Taking every texel a triangle touches therefore
-    /// grew every island by a row and a column the model never shows, which is what an author
+    /// grows every island by a row and a column the model never shows, which is what an author
     /// notices first when they lay the mask over the same UVs in Blender.
     ///
     /// A hundredth of a texel is far below anything a triangle really covers — a UV island one texel

@@ -26,6 +26,17 @@ public sealed class MeshView : Control
 
     /// The model to size and centre the view by, when an animation is moving the one being drawn.
     /// Null means the view is framed by whatever is on screen, which is the ordinary case.
+    public static readonly StyledProperty<bool?> ShelledProperty =
+        AvaloniaProperty.Register<MeshView, bool?>(nameof(Shelled));
+
+    /// Whether to leave out the triangles facing away, when the model says less about that than
+    /// the parts it was joined from do. See MeshRenderer.Render.
+    public bool? Shelled
+    {
+        get => GetValue(ShelledProperty);
+        set => SetValue(ShelledProperty, value);
+    }
+
     public static readonly StyledProperty<UnityMesh?> FramingProperty =
         AvaloniaProperty.Register<MeshView, UnityMesh?>(nameof(Framing));
 
@@ -33,7 +44,7 @@ public sealed class MeshView : Control
     ///
     /// A property rather than a field, and bound two ways, so the view outlives the control: the
     /// pane that draws a mesh is rebuilt whenever what it shows is read again, and an angle kept
-    /// here alone went back to square every time. It also lets two panes share one view, which is
+    /// here alone goes back to square every time. It also lets two panes share one view, which is
     /// what makes a side-by-side comparison a comparison.
     public static readonly StyledProperty<Camera> CameraProperty =
         AvaloniaProperty.Register<MeshView, Camera>(
@@ -87,12 +98,12 @@ public sealed class MeshView : Control
 
     static MeshView()
     {
-        // A new model no longer gets a fresh viewpoint from here. Whether one asset has replaced
-        // another or the same one has merely been read again is a question the control cannot
-        // answer, and answering it wrongly threw away an angle somebody had just chosen; whoever
-        // owns the camera decides.
+        // A new model gets no fresh viewpoint from here. Whether one asset has replaced another or
+        // the same one has merely been read again is a question the control cannot answer, and
+        // answering it wrongly throws away an angle somebody has just chosen; whoever owns the
+        // camera decides.
         AffectsRender<MeshView>(
-            MeshProperty, TexturesProperty, CameraProperty, FramingProperty, StandingProperty);
+            MeshProperty, TexturesProperty, CameraProperty, FramingProperty, StandingProperty, ShelledProperty);
     }
 
     /// Set while the middle button is down, which pans instead of turning.
@@ -170,11 +181,11 @@ public sealed class MeshView : Control
     /// control actually lands on it rather than asked of either separately. The model is rasterised
     /// at that many pixels and drawn back into the room the layout gave it, so it is drawn once per
     /// pixel it is shown at: rendered at the layout's own size and left to be magnified, a model on
-    /// a 150% display — or in a window scaled up in Options — came out soft, which on a model is
+    /// a 150% display — or in a window scaled up in Options — comes out soft, which on a model is
     /// most visible on exactly the thin edges somebody is looking at.
     ///
     /// One, unless something says otherwise: nothing in the visual tree is a transform in the
-    /// headless runs, and the arithmetic below then leaves the size exactly as it was.
+    /// headless runs, and the arithmetic below then leaves the size alone.
     private double PixelsPerUnit
     {
         get
@@ -200,7 +211,7 @@ public sealed class MeshView : Control
             _target.Resize(width, height);
         }
 
-        MeshRenderer.Render(mesh, Camera, _target, Textures, Framing, Viewpoint);
+        MeshRenderer.Render(mesh, Camera, _target, Textures, Framing, Viewpoint, Shelled);
 
         using (var locked = _bitmap.Lock())
             System.Runtime.InteropServices.Marshal.Copy(_target.Bgra, 0, locked.Address, _target.Bgra.Length);

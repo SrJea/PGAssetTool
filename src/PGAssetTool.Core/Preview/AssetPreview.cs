@@ -15,9 +15,8 @@ public sealed record PreviewImage(int Width, int Height, byte[] Bgra)
     /// Red and blue the other way round, which turns RGBA into BGRA and back.
     ///
     /// Everything that reads an image file gets RGBA and everything that shows or writes one here
-    /// wants BGRA, so this loop was written out wherever those two met. Both copies were right;
-    /// what made it worth having once is that a copy which is not is a picture with its reds and
-    /// blues exchanged, and nothing else about it wrong.
+    /// wants BGRA, so one loop rather than one wherever those two meet: a copy of it that is wrong
+    /// is a picture with its reds and blues exchanged, and nothing else about it wrong.
     public static byte[] Swapped(byte[] pixels)
     {
         var swapped = new byte[pixels.Length];
@@ -139,8 +138,7 @@ public static class AssetPreview
     }
 
     /// <param name="bundles">Where a mesh that keeps its vertices in a companion file reads them
-    /// from. Without it such a mesh has no model to show, which is what used to happen to all of
-    /// them.</param>
+    /// from. Without it such a mesh has no model to show.</param>
     public static UnityMesh? Mesh(
         AssetTypeValueField field, Assets.BundleSet? bundles = null, string bundle = "")
     {

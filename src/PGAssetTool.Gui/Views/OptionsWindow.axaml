@@ -103,6 +103,13 @@
           </DockPanel>
           <TextBlock Classes="why" IsVisible="{Binding #WhyMask.IsChecked}"
                      Text="A weapon's texture is an atlas and most of it is nothing: which island belongs to the gun and which to the sights is written in the model's UVs, and an image editor cannot see any of it. With this on, everything no model samples is written out fully transparent, so what is left is what you can actually see in the game. The part that is kept keeps whatever the original had in its alpha channel, so bringing the file back loses nothing. Turn it off for a texture something outside this weapon also uses." />
+
+          <DockPanel>
+            <ToggleButton DockPanel.Dock="Right" Name="WhyArms" Classes="why" Content="?" />
+            <CheckBox Content="Show a weapon in the arms that hold it" IsChecked="{Binding ShowArms}" />
+          </DockPanel>
+          <TextBlock Classes="why" IsVisible="{Binding #WhyArms.IsChecked}"
+                     Text="An item is always previewed whole — an avatar's head, body and legs, a transport's hull and its wheels, both boots — because that is one thing rather than a choice, and shown a mesh at a time most of them are a fragment. The arms are the exception: they are the player's rather than the item's, nearly every weapon's prefab carries the same pair, and the game never draws a weapon without them. With this on they come too, put together the way the prefab puts them, and a clip moves them with everything else. Off by default, because a forearm across the grip is in the way of the thing you are usually here to look at. Either way the view is sized by the item and never by the arms, and what is extracted, packed and installed is the same." />
         </StackPanel>
 
         <StackPanel Spacing="6">

@@ -38,8 +38,8 @@ public class PackIconTests : IDisposable
     public void AViewPannedRightOutOfTheFrameIsBroughtBackRatherThanDrawnEmpty()
     {
         // The icon keeps the angle a view was turned to and finds its own distance and centre, so
-        // a snapshot taken while zoomed into one end of a weapon still shows the weapon. It used to
-        // measure the framing off the drawing, which says nothing at all when there is no drawing.
+        // a snapshot taken while zoomed into one end of a weapon still shows the weapon. Measured
+        // off the drawing instead, the framing says nothing at all when there is no drawing.
         var picture = PackIcon.Render(Quad(), null, (new Camera { Distance = 0.4f }).Panned(40, 0), size: 64);
 
         Assert.False(PackIcon.IsBlank(picture));
@@ -151,7 +151,7 @@ public class PackIconTests : IDisposable
     public void TheModelIsDrawnAcrossTheWholeFrame()
     {
         // A fixed distance is a multiple of the bounding sphere, which for anything long is mostly
-        // empty air — so the icon came out as a small object in a large empty square.
+        // empty air — a small object in a large empty square.
         var picture = PackIcon.Render(Quad(), null, Camera.Facing(0, 0), size: 128);
 
         var (left, top, right, bottom) = Extent(picture);

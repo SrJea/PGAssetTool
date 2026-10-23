@@ -73,8 +73,8 @@ public sealed class Dressing(BundleSet bundles, BundleGraph? graph = null)
         IReadOnlyList<(int FileId, long PathId)> Materials);
 
     /// Every bundle's drawing objects, read once. A workspace's meshes are dressed one at a time and
-    /// each asked the same bundles, so the scan was repeated for every mesh — a prefab bundle's every
-    /// renderer, deserialized again for the arms, again for the muzzle flash.
+    /// each asks the same bundles, so without this the scan repeats for every mesh — a prefab
+    /// bundle's every renderer, deserialized again for the arms, again for the muzzle flash.
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, IReadOnlyList<Drawer>> _drawers =
         new(StringComparer.OrdinalIgnoreCase);
 

@@ -45,8 +45,14 @@
     <!-- Shared: the browse pane and both halves of the editor comparison show the same thing. -->
     <DataTemplate DataType="vm:PreviewViewModel">
       <DockPanel>
-      
-        <StackPanel DockPanel.Dock="Bottom" Margin="0,8,0,0">
+
+        <!-- Beside the model in a wide pane and under it in a narrow one. See Beside. -->
+        <StackPanel DockPanel.Dock="{Binding $parent[DockPanel].Bounds.Width,
+                                     Converter={x:Static ctl:Beside.Side}}"
+                    Width="{Binding $parent[DockPanel].Bounds.Width,
+                            Converter={x:Static ctl:Beside.Room}}"
+                    Margin="{Binding $parent[DockPanel].Bounds.Width,
+                             Converter={x:Static ctl:Beside.Gap}}">
           <!-- What the model can be made to do. Only the clips that move this mesh are offered: a
                weapon's prefab carries animations for the muzzle flash and the shell casing too, and
                one of those plays as a model sitting perfectly still. -->
@@ -143,7 +149,7 @@
                    RenderOptions.BitmapInterpolationMode="None" />
       
             <ctl:MeshView Mesh="{Binding Mesh}" Textures="{Binding MeshTextures}"
-                          Framing="{Binding Rest}" Standing="{Binding Standing}"
+                          Framing="{Binding Framing}" Shelled="{Binding Shelled}" Standing="{Binding Standing}"
                           Camera="{Binding Camera, Mode=TwoWay}"
                           IsVisible="{Binding HasMesh}" />
 
@@ -280,7 +286,8 @@
             <!-- Which of the game's kinds the list is showing. Weapons are what this opens on and
                  what most of it is for; the rest of the game's cosmetics are the same arrangement
                  under other names, so the only thing that changes below is what is in the list.
-                 Hidden for a game with nothing but weapons in it. -->
+                 Hidden while there is only one kind to offer, which is what an installation missing
+                 the other registries would leave. -->
             <ComboBox Name="Kinds" DockPanel.Dock="Top" ItemsSource="{Binding Kinds}"
                       SelectedItem="{Binding Kind}" HorizontalAlignment="Stretch" Margin="0,0,0,6"
                       IsVisible="{Binding OffersKinds}" />
@@ -527,14 +534,20 @@
               </StackPanel>
             </Border>
 
-            <!-- Stacked, not side by side: textures here are square far more often than not, and
-                 the pane is taller than it is wide, so two squares across each get half the room. -->
-            <Grid RowDefinitions="*,8,*" IsVisible="{Binding SideBySide}">
-              <ContentControl Grid.Row="0" Content="{Binding Original}" />
-              <ContentControl Grid.Row="2" Content="{Binding Edited}" />
-            </Grid>
+            <!-- One panel holding both, because a DockPanel gives only its last child the room
+                 that is left: the comparison was sized to its own content and the rest of the pane
+                 stood empty beside it.
 
-            <ContentControl Content="{Binding Shown}" IsVisible="{Binding !SideBySide}" />
+                 Stacked, not side by side: textures here are square far more often than not, and
+                 the pane is taller than it is wide, so two squares across each get half the room. -->
+            <Panel>
+              <Grid RowDefinitions="*,8,*" IsVisible="{Binding SideBySide}">
+                <ContentControl Grid.Row="0" Content="{Binding Original}" />
+                <ContentControl Grid.Row="2" Content="{Binding Edited}" />
+              </Grid>
+
+              <ContentControl Content="{Binding Shown}" IsVisible="{Binding !SideBySide}" />
+            </Panel>
           </DockPanel>
         </Grid>
 

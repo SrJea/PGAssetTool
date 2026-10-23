@@ -338,8 +338,8 @@ public class ModStoreTests : IDisposable
     public void ThePackStoreSitsBesideEverythingElseTheToolKeeps()
         => Assert.Equal(Path.Combine(_home, "mods"), _store.ModsDirectory);
 
-    /// A truncated ledger is what an interrupted write used to leave, and answering "no mods" for
-    /// one would let the next install replace the record of every other mod with itself.
+    /// A truncated ledger is what an interrupted write leaves, and answering "no mods" for one
+    /// would let the next install replace the record of every other mod with itself.
     [Fact]
     public void ALedgerThatCannotBeReadFallsBackToTheCopyKeptBesideIt()
     {

@@ -39,11 +39,11 @@ public enum SealState
     /// It is a protected pack and its seal cannot be read at all: the key, the signature or the
     /// header is not what it should be.
     ///
-    /// Kept apart from Unsigned, which it used to be folded into. Anything that failed to decode
-    /// came back as a plain unsigned zip, so a damaged or doctored seal could be made to disappear
-    /// simply by breaking it — and the pack still read, still installed, and raised nothing.
-    /// Refusing to say "not signed" about a file that plainly carries a signature is the whole of
-    /// the fix; what to do about it is the caller's.
+    /// Kept apart from Unsigned. Folded into it, anything that fails to decode comes back as a
+    /// plain unsigned zip, so a damaged or doctored seal can be made to disappear simply by
+    /// breaking it — and the pack still reads, still installs, and raises nothing. Saying "not
+    /// signed" about a file that plainly carries a signature is the one thing this refuses to do;
+    /// what to do about it is the caller's.
     Invalid,
 }
 
@@ -63,16 +63,14 @@ public static class PackFile
 
     /// The shape of the container, written straight after the magic.
     ///
-    /// It has been there since the first protected pack, but as a control character inside the
-    /// magic's own string literal, where nothing showed it: not the editor, not a diff, not a
-    /// grep for the constant. Anything that strips control characters from a source file — a
-    /// careless paste, a helpful tool — would have quietly changed the magic and left every pack
-    /// built afterwards unreadable by every build before it, with no line in the diff to say so.
-    /// Written out, it is a version byte, which is what it always was.
+    /// A byte of its own, and not a control character inside the magic's own string literal: there
+    /// nothing shows it — not the editor, not a diff, not a grep for the constant — and anything
+    /// that strips control characters from a source file, a careless paste or a helpful tool, would
+    /// change the magic with no line in the diff to say so and leave every pack built afterwards
+    /// unreadable by every build before it.
     ///
-    /// 2 signs the author's name along with the contents. 1 signed the contents alone and is no
-    /// longer read: this tool has not been published, so every pack that ever existed in that
-    /// shape was made by its author while building it, and none of them is worth a branch here.
+    /// 2 signs the author's name along with the contents. 1 signed the contents alone and is not
+    /// read: no pack ever published is in that shape.
     private const byte Format = 2;
 
     /// Fixed, and deliberately so: any build of this tool has to be able to open any pack. A key
@@ -113,7 +111,7 @@ public static class PackFile
     /// A pack is a description of changes and the files they need; the largest one this tool has
     /// built is a few megabytes. The limit is here rather than at the zip because the file is read
     /// whole before any of it is understood — inspecting a seal, listing the manager, drawing a
-    /// tile — so a pack big enough to exhaust memory did so before reaching a single check.
+    /// tile — so a pack big enough to exhaust memory does so before reaching a single check.
     public const long Most = 512L * 1024 * 1024;
 
     /// The zip inside a pack, unscrambled if it needed to be.
@@ -213,8 +211,8 @@ public static class PackFile
     /// zip, which is every pack built with protection off.
     ///
     /// The two ways of not being a protected pack are kept apart. Null means it never claimed to be
-    /// one; a throw means it did and the claim is broken. Folding the second into the first is what
-    /// let a doctored container pass as an ordinary unsigned zip.
+    /// one; a throw means it did and the claim is broken. Folded together, a doctored container
+    /// passes as an ordinary unsigned zip.
     private static (Header Header, byte[] Payload)? Split(byte[] raw)
     {
         if (raw.Length < Magic.Length + 5 || !raw.AsSpan(0, Magic.Length).SequenceEqual(Magic)) return null;
@@ -247,14 +245,14 @@ public static class PackFile
 
     /// What the signature is taken over: the name in the header as well as the contents.
     ///
-    /// A name that is not signed is only a label. An earlier shape signed the contents alone, so
-    /// the author's name could be rewritten in a pack that went on reading as genuinely signed, by
-    /// the genuine key, with the genuine fingerprint beside it — somebody else's name over work
-    /// they did not put it to, or a name taken off work that was theirs. Nothing about the
-    /// contents was at risk either way, which is exactly why it was easy to miss.
+    /// A name that is not signed is only a label. Over the contents alone, the author's name can be
+    /// rewritten in a pack that goes on reading as genuinely signed, by the genuine key, with the
+    /// genuine fingerprint beside it — somebody else's name over work they did not put it to, or a
+    /// name taken off work that was theirs. Nothing about the contents is at risk either way, which
+    /// is what makes it easy to miss.
     ///
-    /// Re-signing a pack under another key is still not prevented, because it cannot be. What it
-    /// costs is the fingerprint, and now the name cannot be moved without the key.
+    /// Re-signing a pack under another key is not prevented, because it cannot be. What it costs is
+    /// the fingerprint; the name is what cannot be moved without the key.
     ///
     /// The name is length-prefixed rather than run together with the payload, so that no two
     /// (name, contents) pairs can produce the same bytes to sign.

@@ -87,10 +87,10 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
     /// Whether anything is going on that the window should say is going on.
     ///
-    /// The manager's work is the other half of it and was missing: turning a mod on restores and
-    /// rewrites bundles for a second or two, on its own tab, and the bar in the status line — the
-    /// one thing on screen that says the tool is doing something — stayed still throughout, because
-    /// the manager keeps a busy flag of its own and this is what the window binds.
+    /// The manager's work is the other half of it: turning a mod on restores and rewrites bundles
+    /// for a second or two, on its own tab, and the bar in the status line — the one thing on
+    /// screen that says the tool is doing something — is bound to this rather than to the busy flag
+    /// the manager keeps of its own.
     public bool Working => Busy || Manager.Busy;
 
     [ObservableProperty] private string _search = "";
@@ -176,6 +176,16 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     /// it changes, so a saved 'off' read into a field that was already 'off' would tell it nothing
     /// and leave its list naming the wrong answer.
     [ObservableProperty] private bool _protectPacks = true;
+
+    /// Whether a weapon is shown in the arms that hold it. See ToolSettings.ShowArms.
+    [ObservableProperty] private bool _showArms;
+
+    /// Shown again with the answer that changed, since what is on screen was built for the old one.
+    partial void OnShowArmsChanged(bool value)
+    {
+        Remember();
+        if (Detail?.SelectedNode is { } showing) ShowPreview(showing);
+    }
 
     partial void OnProtectPacksChanged(bool value)
     {
@@ -311,6 +321,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         Manager.TileSize = _settings.TileSize;
         Manager.Order = (ModOrder)_settings.ModOrder;
         ProtectPacks = _settings.ProtectPacks;
+        ShowArms = _settings.ShowArms;
         FasterApplies = _settings.FasterApplies;
         LighterApplies = _settings.LighterApplies;
         ReadMemory = _settings.ReadMemory;
@@ -331,17 +342,24 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
                 var game = _installation;
 
-                // The game as shipped, not as modded. Browsing an installed weapon showed the mod,
-                // and extracting it wrote the mod's bytes out as the weapon's own — and since a pack
-                // carries only what changed after the extract, an author could build a pack around
-                // somebody else's installed work without either of them seeing it. It also stops a
-                // protected pack being lifted straight back out of the game it went into, which is
-                // the weaker reason. Mods are checked in the game.
-                _bundles = new BundleSet(game, originals: new ModStore(game).OriginalOf)
+                // The game as shipped, not as modded. Read as it is, browsing an installed weapon
+                // shows the mod and extracting it writes the mod's bytes out as the weapon's own —
+                // and since a pack carries only what changed after the extract, an author can build
+                // a pack around somebody else's installed work without either of them seeing it.
+                // It also stops a protected pack being lifted straight back out of the game it went
+                // into, which is the weaker reason. Mods are checked in the game.
+                var store = new ModStore(game);
+                _bundles = new BundleSet(game, originals: store.OriginalOf)
                 {
                     UnpackBudget = ReadMemory * 1024L * 1024,
                 };
-                _catalogs = GameCatalogs.Load(_bundles, string.IsNullOrEmpty(Language) ? _settings.Language : Language);
+
+                // The name tables are kept in this installation's own folder, beside its backups
+                // and its ledger: they are read from this game's bundles and are worth nothing
+                // against another. See WeaponNames.
+                _catalogs = GameCatalogs.Load(
+                    _bundles, string.IsNullOrEmpty(Language) ? _settings.Language : Language,
+                    remember: store.Root);
                 _resolver = new WeaponResolver(_bundles, _catalogs);
             });
 
@@ -353,9 +371,10 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             // back by name: a reload rebuilds these objects, and the one held before it is not the
             // one in the list afterwards.
             var was = Kind.Name;
-            // Every kind. They were held back to weapons alone while weapons were finished; the
-            // others resolve, preview, extract, pack and install through the same code, and the
-            // command line has been answering for them all along.
+            // Every kind: they resolve, preview, extract, pack and install through the same code as
+            // weapons, and the command line answers for them the same way. Measured over all of
+            // them, every non-weapon kind resolves a bundle, a model and an icon for every item it
+            // has, in 6 to 19ms each against a weapon's 38.
             Kinds.Clear();
             foreach (var kind in _catalogs!.Kinds) Kinds.Add(kind);
             OnPropertyChanged(nameof(OffersKinds));
@@ -723,10 +742,9 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     ///
     /// Their seals are read before anything is written, which is the only moment saying so is any
     /// use. A pack that has been changed since it was signed still installs if that is what somebody
-    /// wants: a pack is a description of changes, and the tool has always taken the view that
-    /// whoever holds one may install it. What it did not do was tell them first. The seal was read
-    /// when a row was selected in the manager — after the game had been rewritten — so the one fact
-    /// worth having before deciding arrived only after the decision.
+    /// wants: a pack is a description of changes, and whoever holds one may install it. Read when a
+    /// row is selected in the manager instead — after the game has been rewritten — and the one fact
+    /// worth having before deciding arrives only after the decision.
     public Task InstallPacks(IReadOnlyList<string> paths)
     {
         if (paths.Count == 0) return Task.CompletedTask;
@@ -858,9 +876,9 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     /// Puts the keyboard in the search box of whichever workspace is showing, and does nothing in
     /// one that has none.
     ///
-    /// It used to switch to Browse first, so Ctrl+F in the manager — which has a search of its own —
-    /// threw away the shelf you were looking at to search the weapon list instead. A shortcut that
-    /// means "find" is about what is in front of you.
+    /// A shortcut that means "find" is about what is in front of you: switching to Browse first
+    /// would have Ctrl+F in the manager — which has a search of its own — throw away the shelf
+    /// being looked at to search the weapon list instead.
     [RelayCommand]
     private void FocusSearch() => SearchRequested?.Invoke();
 
@@ -876,9 +894,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private void ToggleAlpha()
     {
-        // The pane in front. It used to be the browse one wherever you were, so the shortcut did
-        // nothing visible while the editor was open — and the editor is where a texture is being
-        // worked on, which is when the question comes up.
+        // The pane in front, rather than the browse one wherever you are: the editor is where a
+        // texture is being worked on, which is when the question comes up.
         if (Showing is { CanToggleAlpha: true } preview) preview.ShowAlpha = !preview.ShowAlpha;
     }
 
@@ -926,7 +943,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     /// Changing the language means every name in the catalogs, so the game is read again.
     /// Only the translation table depends on the language. The items, the lookup table, the skins
     /// and the search index do not, so changing which name is displayed re-reads one small bundle
-    /// rather than the whole game — it used to throw the reader away and start over.
+    /// rather than throwing the reader away and starting over.
     partial void OnLanguageChanged(string value)
     {
         // Nothing is not a language. A picker whose list is being refilled or rebuilt can pass on an
@@ -958,9 +975,9 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     /// What a pack's weapon and skin are called in the language the catalogues are open in.
     ///
     /// Looked up by number and by skin id, not by anything the pack carries: the pack was built in
-    /// whatever language its author was using, and packs built before this existed carry nothing to
-    /// translate at all. What it recorded is the last resort — better than a blank, and the honest
-    /// answer for a weapon this installation does not have.
+    /// whatever language its author was using, and some carry nothing to translate at all. What the
+    /// pack recorded is the last resort — better than a blank, and the honest answer for a weapon
+    /// this installation does not have.
     private (string? Name, string? Variant) Naming(Core.Pack.PackSubject subject)
     {
         if (_catalogs is not { } catalogs) return (null, null);
@@ -1006,6 +1023,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             SideBySide = Editor.SideBySide, LinkedPreviews = Editor.Linked,
             ConfirmChanges = Manager.ConfirmChanges,
             TileSize = Manager.TileSize, ModOrder = (int)Manager.Order, ProtectPacks = ProtectPacks,
+            ShowArms = ShowArms,
             FasterApplies = FasterApplies, LighterApplies = LighterApplies, ReadMemory = ReadMemory,
             MaskUnusedTextures = MaskUnusedTextures, UiScale = UiScale,
         };
@@ -1019,10 +1037,6 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         }
     }
 
-    /// Decodes the textures the renderer drawing this mesh uses, one per submesh.
-    ///
-    /// A Mesh asset carries no appearance of its own, so without this a weapon previews as grey
-    /// geometry and the thing being judged — how a texture sits on the model — is invisible.
     /// A texture to put on the next mesh shown, if it is on the list when that mesh arrives.
     ///
     /// Set rather than applied, because it takes effect after the model does: showing a mesh puts
@@ -1042,6 +1056,426 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             ? null
             : RowFor(AllNodes(detail.Roots).Where(n => n.Within is null), _tree.MainMesh);
 
+    /// Whether a mesh of the prefab is the player's arms rather than the item.
+    ///
+    /// Three names, because the game uses three: `Arms_Mesh` (and `ARMS_Mesh`, and `Arms_Mesh001`
+    /// where the model was exported beside another of the same name), which nearly every weapon
+    /// prefab carries; `FPS_PLAYER_Arm_left` and `_Right`, a pair modelled separately; and
+    /// `player001`/`player002`, which is #44 Mauser's name for the same pair. The number on the end
+    /// is the exporter's and means nothing, so it is taken off before the name is read — but only
+    /// off the end, and never loosely enough to catch an item called after its own arms: an
+    /// avatar's model can be `avatar_ programmer_arms_mesh`, and that one *is* the item.
+    private static bool AreArms(string name)
+        => name.AsSpan().TrimEnd("0123456789")
+                .Equals(Core.Weapons.WeaponResolver.Arms, StringComparison.OrdinalIgnoreCase)
+            || name.StartsWith("FPS_PLAYER_Arm", StringComparison.OrdinalIgnoreCase)
+            || (name.StartsWith("player", StringComparison.OrdinalIgnoreCase)
+                && name.Length > 6 && char.IsDigit(name[^1]));
+
+    /// Whether a part of the prefab is something the item is drawn *with* rather than part of it:
+    /// the shadow under a car, a collider, a pivot marker.
+    ///
+    /// **A part nothing dresses is one of these, nearly always.** The game draws a car's shadow
+    /// through a material that makes it a shadow on the ground, and the preview has none, so it came
+    /// out as the grey box a car was sitting on — 41 of 90 transports have one. Measured over 2,633
+    /// items: 3,913 of the parts drawn beside a model wear a texture and 263 wear none, and the 263
+    /// are shadows, colliders, `UnityPivot`, `Box001`, `firecracker`, and meshes belonging to other
+    /// items entirely.
+    ///
+    /// **Except the ones named after the item**, which are the real parts the game simply paints
+    /// some other way: 26 of the 263, among them `glider_mystery_bug`'s two wings,
+    /// `scorching_split`'s chain, `avatar_party_gummy`'s hair and a dozen of
+    /// `avatar_storms_overlord`'s limbs. Those are kept and drawn plain.
+    ///
+    /// And not even then if the name says what it is. The game calls these `_shadow`, `_shadows`,
+    /// `_shade`, `_shadou` (a car spells it that way), `_collider`, `_colider` and `_holo`, and
+    /// `royale_car_patriot_shadow` is named after its car as surely as a wing is. Eight items are
+    /// *called* shadow — `sword_of_shadows`, `avatar_the_shadow` — and their own meshes say so all
+    /// the way through; those are models on a row rather than parts beside one, so this is never
+    /// asked of them.
+    private static bool IsDecoration(string name, string? slug)
+    {
+        string[] said = ["shadow", "shadows", "shade", "shadou", "collider", "colider", "holo"];
+        var stem = name.EndsWith("_mesh", StringComparison.OrdinalIgnoreCase) ? name[..^5] : name;
+        if (said.Any(s => stem.EndsWith(s, StringComparison.OrdinalIgnoreCase))) return true;
+
+        // Named after the item it belongs to, which is what tells a wing from a leftover. Compared
+        // without the underscores, since the two are not punctuated alike, and on the first ten
+        // characters, which is enough to tell `glider_mystery_bug` from `royale_pressed_cars_01`.
+        if (slug is not { Length: > 4 }) return true;
+
+        var mine = name.Replace("_", "").ToLowerInvariant();
+        var theirs = slug.Replace("_", "").ToLowerInvariant();
+        var head = Math.Min(10, Math.Min(mine.Length, theirs.Length));
+        return !mine.StartsWith(theirs[..head], StringComparison.Ordinal)
+            && !theirs.StartsWith(mine[..head], StringComparison.Ordinal);
+    }
+
+    /// This mesh's skeleton, read under the item's own prefab where there is one to name.
+    ///
+    /// **Several prefabs draw the same meshes and they disagree.** A weapon's own prefab holds one
+    /// arrangement and `<prefab>_info`, the one the shop shows, holds another — and `Skeleton.For`
+    /// answering by mesh alone takes whichever renderer comes first in the file, which is an
+    /// accident of file order. Read that way, #1's gun comes back under `Weapon1_info` and its arms
+    /// under `Weapon1`: two hierarchies, so the two land a metre apart with nothing saying so.
+    ///
+    /// **And where the item's own root holds no copy of this mesh, the first the shop does not
+    /// own.** `avatar_bronze_hero`'s parts hang under another item's root and come from Places the
+    /// same way: taking them from one arrangement and the model on the row from another puts the
+    /// head beside the body. The walk costs a rig per placement, which is why it is asked only when
+    /// the item's own root has answered nothing.
+    private Skeleton? Under(string bundle, long pathId)
+        => (PrefabRoot is { } root ? Skeleton.For(_bundles!, bundle, pathId, root, whole: true) : null)
+            ?? Skeleton.Every(_bundles!, bundle, pathId, whole: true)
+                .FirstOrDefault(place => !Outlined(place.Under) && !Copy(place.Root))?.Skeleton
+            ?? Skeleton.For(_bundles!, bundle, pathId, whole: true);
+
+    private string? PrefabRoot
+        => _tree?.PrefabPath is { Length: > 0 } path ? path[(path.LastIndexOf('/') + 1)..] : null;
+
+    /// Everywhere this item draws a mesh, which is once per renderer that names it.
+    ///
+    /// **The placements under the item's own prefab root, wherever it has any.** A `_shop` or
+    /// `_info` root holds the same parts arranged its own way, so taking every placement there is
+    /// draws each part twice, in two places.
+    ///
+    /// **And where it has none, every placement that is not somebody else's.** An item's prefab and
+    /// the model it is built from are not always one hierarchy: `avatar_bronze_hero` names no
+    /// renderer at all, its head, body, legs and arms hanging under `avatar_lvl_65_hero`, which is
+    /// itself an item — the level-65 hero the bronze, silver and gold tiers are built on. An item
+    /// that has a hierarchy of its own and still reaches into another's is reaching through the
+    /// closure rather than wearing what it finds: `mask_medical_mask` reaches
+    /// `mask_doctor_plague_mesh`, and a medical mask is not worn with a plague doctor's. An item
+    /// with no hierarchy of its own has nothing else to be, so whatever it reaches is what it is.
+    ///
+    /// Measured over every item: 214 parts are drawn that were not, and two are left out — the
+    /// plague doctor's mask above, and one weapon reaching another's mesh the same way.
+    private List<Skeleton.Placement> Places(AssetNode mesh, string bundle, bool hasOwn)
+    {
+        var places = Skeleton.Every(_bundles!, bundle, mesh.PathId, whole: true)
+            .Where(p => !Outlined(p.Under) && !Copy(p.Root))
+            .ToList();
+
+        var own = places
+            .Where(p => string.Equals(p.Root, PrefabRoot, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        return own.Count > 0
+            ? own
+            : [.. places.Where(p => !hasOwn || !Somebody(p.Root))];
+    }
+
+    /// A pair of boots is drawn as a pair.
+    ///
+    /// The game puts a boot on each foot as it dresses a player, and the prefab holds one boot — or
+    /// a left and a right that both stand in the same place. Measured over all 47: 44 carry one
+    /// mesh and three carry two, none carries more, and every one of them is centred within a
+    /// hundredth of x=0. So what the preview drew was one boot, or two boots inside each other.
+    ///
+    /// Nothing in the bundle says how far apart the feet go, so they are set side by side by the
+    /// boot's own width. The one on the row is drawn by the preview itself and cannot be moved, so
+    /// it is the other that steps across; where there is no other, it is this one mirrored, because
+    /// a boot is a left or a right and a pair is not two of the same.
+    private void Pair(
+        TreeNode node,
+        IReadOnlyList<(AssetNode Node, UnityMesh Mesh, List<Skeleton.Placement> Places)> found,
+        List<(UnityMesh Mesh, Skeleton Skeleton, bool Frames)> with,
+        List<PreviewImage?> wearing)
+    {
+        if (with.Count > 1) return;
+
+        var row = found.FirstOrDefault(f => f.Node.PathId == node.PathId);
+        if (row.Mesh is not { } standing || row.Places is not { Count: > 0 } places) return;
+
+        var box = MeshBounds.Of(places[0].Skeleton.Placed(standing, null, 0f));
+        if (box.Size.X <= 0) return;
+
+        if (with.Count == 1)
+        {
+            var (mesh, skeleton, frames) = with[0];
+            if (Beside(skeleton, mesh, 1f, box.Size.X, 0f) is { } aside)
+                with[0] = (aside, skeleton, frames);
+            return;
+        }
+
+        if (Beside(places[0].Skeleton, standing, -1f, box.Size.X, box.Centre.X) is not { } other) return;
+
+        with.Add((other, places[0].Skeleton, true));
+        wearing.AddRange(PerSubMesh(
+            TexturesFor(_tree!.MeshTextures.FirstOrDefault(m => m.MeshPathId == node.PathId)), standing));
+    }
+
+    /// The same mesh a step along the item's own X, mirrored where it has to become the other foot.
+    ///
+    /// Moved in the prefab's space, which is where the pair stands: the mesh is taken there, moved,
+    /// and brought back again, so a boot the prefab turns or scales steps along the axis it stands
+    /// on rather than along whichever way its own vertices happen to be written.
+    private static UnityMesh? Beside(
+        Skeleton skeleton, UnityMesh mesh, float facing, float step, float centre)
+    {
+        if (skeleton.Home(mesh) is not { } home) return null;
+
+        // Column-major, as everything here keeps them: x' = facing * x + step, mirrored about the
+        // plane the mesh's own middle stands on so that it turns over where it is.
+        float[] across =
+        [
+            facing, 0, 0, 0,
+            0, 1, 0, 0,
+            0, 0, 1, 0,
+            (facing < 0 ? 2 * centre : 0) + step, 0, 0, 1,
+        ];
+
+        return Skeleton.Moved(mesh, Matrix.Times(home, Matrix.Times(across, Matrix.Inverse(home))));
+    }
+
+    /// Which way up the model opens.
+    ///
+    /// A weapon by its muzzle, which the prefab's landmarks answer and the bounding box cannot.
+    /// Everything else standing the way the prefab hangs it: the box would sort an avatar's height
+    /// across the screen and lay it down. A mesh nothing in the prefab places has no prefab space
+    /// to borrow and is left to the box. See Facing.
+    private MeshRenderer.Basis Standing(TreeNode node, UnityMesh model, Skeleton? skeleton)
+        => _tree?.Record.Kind == ItemKinds.Weapon || skeleton?.Home(model) is not { } home
+            ? Facing.Standing(_bundles!, node.Bundle, skeleton?.Assembled(model) ?? model, node.PathId)
+            : Facing.Upright(home);
+
+    /// Whether a root is the item's own prefab root.
+    private bool Mine(string root)
+        => string.Equals(root, PrefabRoot, StringComparison.OrdinalIgnoreCase);
+
+    /// The sphere the item's own parts fill, in the prefab's space.
+    ///
+    /// The arms are in it, so that turning them off does not move it and change what is drawn
+    /// beside the model.
+    private Reach? Around(
+        IReadOnlyList<(AssetNode Node, UnityMesh Mesh, List<Skeleton.Placement> Places)> found)
+        => Reach.Round(found
+            .SelectMany(part => part.Places
+                .Where(place => Mine(place.Root))
+                .Select(place => place.Skeleton.Placed(part.Mesh, null, 0f))));
+
+    /// The ball an item fills, and whether something drawn in the same space lands on it.
+    private readonly record struct Reach((float X, float Y, float Z) Centre, float Radius)
+    {
+        public static Reach? Round(IEnumerable<UnityMesh> parts)
+        {
+            float minX = float.MaxValue, minY = float.MaxValue, minZ = float.MaxValue;
+            float maxX = float.MinValue, maxY = float.MinValue, maxZ = float.MinValue;
+            var any = false;
+
+            foreach (var part in parts)
+            {
+                if (part.VertexCount == 0) continue;
+
+                var box = MeshBounds.Of(part);
+                minX = Math.Min(minX, box.Centre.X - box.Size.X / 2);
+                maxX = Math.Max(maxX, box.Centre.X + box.Size.X / 2);
+                minY = Math.Min(minY, box.Centre.Y - box.Size.Y / 2);
+                maxY = Math.Max(maxY, box.Centre.Y + box.Size.Y / 2);
+                minZ = Math.Min(minZ, box.Centre.Z - box.Size.Z / 2);
+                maxZ = Math.Max(maxZ, box.Centre.Z + box.Size.Z / 2);
+                any = true;
+            }
+
+            var (x, y, z) = ((maxX - minX) / 2, (maxY - minY) / 2, (maxZ - minZ) / 2);
+            return any
+                ? new Reach((minX + x, minY + y, minZ + z), MathF.Sqrt(x * x + y * y + z * z))
+                : null;
+        }
+
+        public bool Holds(UnityMesh placed)
+        {
+            if (placed.VertexCount == 0) return true;
+
+            var box = MeshBounds.Of(placed);
+            var away = MathF.Sqrt(
+                MathF.Pow(box.Centre.X - Centre.X, 2)
+                + MathF.Pow(box.Centre.Y - Centre.Y, 2)
+                + MathF.Pow(box.Centre.Z - Centre.Z, 2));
+            return away - box.Radius <= Radius;
+        }
+    }
+
+    /// One texture per submesh of the mesh they belong to, however many the renderer named.
+    ///
+    /// A renderer can carry more materials than the mesh it draws has submeshes, and the surplus
+    /// draws nothing: `avatar_earth` has two over a one-submesh pair of arms. The parts of an item
+    /// are joined submesh by submesh and the textures follow that join, so a surplus taken as given
+    /// moves every texture after it onto the wrong part — the avatar's head wears its body.
+    private static IReadOnlyList<PreviewImage?> PerSubMesh(
+        IReadOnlyList<PreviewImage?>? pictures, UnityMesh mesh)
+    {
+        var wanted = Math.Max(mesh.SubMeshes.Count, 1);
+        if (pictures is null) return [.. Enumerable.Repeat((PreviewImage?)null, wanted)];
+        if (pictures.Count == wanted) return pictures;
+
+        return [.. Enumerable.Range(0, wanted).Select(at => at < pictures.Count ? pictures[at] : null)];
+    }
+
+    /// Whether any of this item's meshes is placed under the item's own prefab root.
+    ///
+    /// Asked of the names alone, before any rig is read: a transport comes to twenty placements and
+    /// reading the rig is most of what one costs. See Skeleton.Placings.
+    private bool HasOwnHierarchy(IReadOnlyList<AssetNode> meshes, string prefabBundle)
+        => PrefabRoot is { } root && meshes.Any(mesh => Skeleton
+            .Placings(_bundles!, mesh.Bundle.Length > 0 ? mesh.Bundle : prefabBundle, mesh.PathId)
+            .Any(under => !Outlined(under)
+                && under.Count > 0
+                && string.Equals(under[^1], root, StringComparison.OrdinalIgnoreCase)));
+
+    /// A prefab holding the game's own second arrangement of an item: the shop's, and the one the
+    /// preview in a weapon's info panel uses.
+    private static bool Copy(string root)
+        => root.Length == 0
+            || root.EndsWith("_shop", StringComparison.OrdinalIgnoreCase)
+            || root.EndsWith("_info", StringComparison.OrdinalIgnoreCase);
+
+    /// Whether a root is another item's prefab rather than this one's.
+    private bool Somebody(string root)
+        => _tree?.Record is { } record
+            && !string.Equals(root, record.PrefabName, StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(root, record.Slug, StringComparison.OrdinalIgnoreCase)
+            && ItemNames().Contains(root);
+
+    /// Every name the game files an item under, kept per reading of the catalogues.
+    private (GameCatalogs? Of, IReadOnlySet<string>? Names) _itemNames;
+
+    private IReadOnlySet<string> ItemNames()
+    {
+        if (ReferenceEquals(_itemNames.Of, _catalogs) && _itemNames.Names is { } known) return known;
+
+        IReadOnlySet<string> names = _catalogs is not { } catalogs
+            ? new HashSet<string>()
+            : new HashSet<string>(
+                catalogs.Kinds.SelectMany(catalogs.Of).SelectMany(r => new[] { r.PrefabName, r.Slug }),
+                StringComparer.OrdinalIgnoreCase);
+
+        _itemNames = (_catalogs, names);
+        return names;
+    }
+
+    /// Whether the game draws this copy of a mesh as the cel-shaded outline behind the model.
+    ///
+    /// An outline is a second placement of the same mesh under a `_outline` object, turned inside
+    /// out by its own transform. Drawn as a surface it covers the model: `avatar_cube_the_greatest`
+    /// carries one per head decoration, which is 74 parts where the avatar has 39.
+    private static bool Outlined(IReadOnlyList<string> under)
+        => under.Any(n => n.EndsWith("_outline", StringComparison.OrdinalIgnoreCase)
+            || n.Equals("outline", StringComparison.OrdinalIgnoreCase));
+
+    /// The rest of the prefab, to be drawn with the mesh on this row.
+    ///
+    /// **Most of what this finds is the item itself, not something it is held in.** Measured over
+    /// 811 items: of the extra meshes something places, 1,100 are parts of the item, 149 are
+    /// `Arms_Mesh` and 50 are named `vfx=`. An avatar is a head, a body and legs — 120 of 120 — a
+    /// transport is a hull and its wheels, 90 of 90 and up to 29 pieces, and a pair of boots is two
+    /// meshes. Shown one mesh at a time, every one of those is a fragment: `avatar_ programmer` is
+    /// two slabs.
+    ///
+    /// So the parts of the item always come, and only the arms are the setting's business. An effect
+    /// — the `vfx=` names, a muzzle flash or a glow — is left out either way: it is drawn by a
+    /// particle system in the game rather than standing there, and a quad hanging in the middle of
+    /// the model is not what anybody opened the row to see.
+    ///
+    /// **Only what something places.** A mesh no renderer in this prefab owns a skeleton for has
+    /// nowhere to be put, and drawn unposed it sits at the origin.
+    ///
+    /// **And only what lands on the item.** A placement under another hierarchy is positioned in
+    /// that hierarchy's space, which says nothing about where this item is: `magicbook_love`'s
+    /// bullet comes out a metre from the book. Framing the pair is what the loss is — the book is
+    /// then a third of the picture, with a speck beside it. Measured over every item: 26 placements
+    /// stand clear of the ball their item fills, and they are projectiles, spare states of a part
+    /// (`small_assistant_rifle` carries an empty, a half and a full battery), effects and `Box001`.
+    /// Judged against the item's own hierarchy, so an item that has none keeps whatever it reaches.
+    ///
+    /// `Frames` is what the view is sized by: the item, never the arms. Framing by the pair shrinks
+    /// every weapon to make room for a forearm reaching out of the picture.
+    private (List<(UnityMesh Mesh, Skeleton Skeleton, bool Frames)> With, List<PreviewImage?> Wearing)
+        Held(TreeNode node)
+    {
+        var with = new List<(UnityMesh, Skeleton, bool)>();
+        var wearing = new List<PreviewImage?>();
+        if (_tree?.PrefabBundle is not { } prefabBundle) return (with, wearing);
+
+        var meshes = _tree.PrefabAssets
+            .Where(a => a.Class == AssetClassID.Mesh
+                && !a.Name.StartsWith("vfx=", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        var hasOwn = HasOwnHierarchy(meshes, prefabBundle);
+
+        var found = new List<(AssetNode Node, UnityMesh Mesh, List<Skeleton.Placement> Places)>();
+        foreach (var other in meshes)
+        {
+            var bundle = other.Bundle.Length > 0 ? other.Bundle : prefabBundle;
+            try
+            {
+                if (AssetPreview.Locate(_bundles!, bundle, AssetClassID.Mesh, other.PathId, other.Name)
+                    is not var (file, info)) continue;
+
+                var field = _bundles!.Context.Deserialize(file, info);
+                // Through AssetPreview, because a part can keep its vertices in the bundle's
+                // companion file as a texture keeps its pixels, and read without one it has no
+                // geometry at all. Three transports' bodies are stored that way.
+                if (field is null || AssetPreview.Mesh(field, _bundles, bundle)
+                    is not { VertexCount: > 0 } mesh) continue;
+                if (!Skeleton.Drawn(_bundles, bundle, other.PathId)) continue;
+
+                found.Add((other, mesh, Places(other, bundle, hasOwn)));
+            }
+            catch (Exception)
+            {
+                // One part that will not read is a part not drawn. The model is still the model.
+            }
+        }
+
+        var reach = hasOwn ? Around(found) : null;
+
+        foreach (var (other, mesh, placed) in found)
+        {
+            var arms = AreArms(other.Name);
+            if (arms && !ShowArms) continue;
+
+            try
+            {
+                // Every place the item puts this mesh, less the first of the mesh on the row: that
+                // one is the model being shown, drawn by the preview itself. A wheel selected out
+                // of the ten a transport places is still the other nine, which is why the row's
+                // mesh is here at all rather than skipped.
+                var places = reach is { } sphere
+                    ? [.. placed.Where(p => Mine(p.Root) || sphere.Holds(p.Skeleton.Placed(mesh, null, 0f)))]
+                    : placed;
+                if (other.PathId == node.PathId) places = [.. places.Skip(1)];
+                if (places.Count == 0) continue;
+
+                // Dressed, or named after the item and so one of its own. See IsDecoration.
+                var pictures = TexturesFor(_tree.MeshTextures
+                    .FirstOrDefault(m => m.MeshPathId == other.PathId));
+                if (pictures?.Any(p => p is not null) != true
+                    && IsDecoration(other.Name, _tree.Record.Slug)) continue;
+
+                foreach (var place in places)
+                {
+                    with.Add((mesh, place.Skeleton, !arms));
+                    wearing.AddRange(PerSubMesh(pictures, mesh));
+                }
+            }
+            catch (Exception)
+            {
+                // One part that will not read is a part not drawn. The model is still the model.
+            }
+        }
+
+        if (ItemKinds.Boots.Equals(_tree.Record.Kind)) Pair(node, found, with, wearing);
+
+        return (with, wearing);
+    }
+
+    /// One texture list for the model and everything drawn with it, in the order the submeshes end
+    /// up in. A model with nothing beside it keeps the list it had, null and all.
+    private static IReadOnlyList<PreviewImage?>? Alongside(
+        IReadOnlyList<PreviewImage?>? mine, UnityMesh model, IReadOnlyList<PreviewImage?> theirs)
+        => theirs.Count == 0 ? mine : [.. PerSubMesh(mine, model), .. theirs];
+
     /// What the game draws the mesh on this row with. Null for a row nothing was found for.
     ///
     /// The row's own answer first, and only then the weapon's. A skin's model can point at the
@@ -1050,6 +1484,10 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private MeshTextures? SlotsFor(TreeNode node)
         => node.Within?.Wearing ?? _tree?.MeshTextures.FirstOrDefault(m => m.MeshPathId == node.PathId);
 
+    /// Decodes the textures the renderer drawing this mesh uses, one per submesh.
+    ///
+    /// A Mesh asset carries no appearance of its own, so without this a weapon previews as grey
+    /// geometry and the thing being judged — how a texture sits on the model — is invisible.
     private IReadOnlyList<PreviewImage?>? TexturesFor(MeshTextures? slots)
     {
         if (slots is null) return null;
@@ -1419,8 +1857,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private async void ShowPreview(TreeNode? node)
     {
         // A skin row stands for a look rather than for an asset, so selecting one shows the weapon
-        // wearing it. It used to have to be opened for that, which also unfolded it — and going
-        // down a weapon's eight skins to see what they look like is the ordinary thing to do here.
+        // wearing it without opening the row, which would unfold it — and going down a weapon's
+        // eight skins to see what they look like is the ordinary thing to do here.
         if (node is { Skin: not null }) { OpenSkin(node); return; }
 
         if (node?.Class is not (AssetClassID.Texture2D or AssetClassID.Mesh or AssetClassID.AudioClip))
@@ -1466,13 +1904,22 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                 // the bones are the renderer's and the clips are the prefab's, and a mesh with
                 // neither is shown standing still as it always was. The prefab being the one the row
                 // was reached through: a skin's own model moves by its own clips.
+                // The whole prefab when the arms are wanted, because they hang off objects no mesh
+                // is skinned to and a bone list has nowhere to put them. See Skeleton.For.
                 var (skeleton, motions) = loaded is UnityMesh
                     ? await Task.Run(() =>
                     {
-                        var bones = Skeleton.For(_bundles!, node.Bundle, node.PathId);
+                        var bones = Under(node.Bundle, node.PathId);
                         return (bones, ClipsFor(node, bones));
                     })
                     : (null, []);
+
+                // The rest of the prefab, and what those parts wear. An item is drawn whole because
+                // it is one thing — a head, a body and legs, or a hull and its wheels — and showing
+                // one mesh of it shows a fragment. Only the arms wait to be asked for. See Held.
+                var (with, alongside) = loaded is UnityMesh && skeleton is not null
+                    ? await Task.Run(() => Held(node))
+                    : ([], []);
 
                 // Which way round it opens, from the prefab rather than from the bounding box, so
                 // every weapon points the same way. Read here because it needs the bundle, which
@@ -1480,9 +1927,12 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                 // Of the model put together rather than of the model as written: the box a
                 // scattered model fills says nothing about which way it lies. See
                 // Skeleton.Assembled.
+                //
+                // Of the model in its own space, whatever is shown beside it. The parts are joined in
+                // the prefab's space and taken back into this one before anything sees them, because
+                // a weapon's facing is read against landmarks that answer here. See PreviewViewModel.
                 var standing = loaded is UnityMesh model
-                    ? await Task.Run(() => Facing.Standing(
-                        _bundles!, node.Bundle, skeleton?.Assembled(model) ?? model, node.PathId))
+                    ? await Task.Run(() => Standing(node, model, skeleton))
                     : (MeshRenderer.Basis?)null;
 
                 switch (loaded)
@@ -1494,14 +1944,17 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                         // Reordered before it is shown, so the choice this mesh is remembered with
                         // lands in a list that already holds it.
                         OfferTextures(node);
-                        Preview.Show(mesh, $"{node.Label}   @ {node.Bundle}", TexturesFor(SlotsFor(node)),
+                        // The parts drawn with it follow this mesh's submeshes, so their textures
+                        // follow its textures: the renderer takes one per submesh, in order.
+                        Preview.Show(mesh, $"{node.Label}   @ {node.Bundle}",
+                            Alongside(TexturesFor(SlotsFor(node)), mesh, alongside),
                             // The model it was reached through is part of which model this is: two
                             // rows can stand for the same asset, and an angle turned to on one of
                             // them is not the angle the other was left at.
                             subject: node.Within is { } within
                                 ? $"{within.Path}/{node.Bundle}:{node.PathId}"
                                 : $"{node.Bundle}:{node.PathId}",
-                            skeleton: skeleton, motions: motions, standing: standing);
+                            skeleton: skeleton, motions: motions, standing: standing, with: with);
 
                         // After the model, which puts back whatever this mesh was last wearing.
                         // Taken whether or not it was found, so it cannot arrive on the next one.

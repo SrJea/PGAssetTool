@@ -58,8 +58,8 @@ public static class MeshImporter
     /// <param name="resource">
     /// Reads the bundle's own stream entries, for a mesh that keeps its vertices there rather than
     /// in the object. Only the original is read through it, and only to say what changed and to
-    /// line up the bones — but without it such a mesh could not be replaced at all: `glider_basic`,
-    /// which several gliders are built on, failed every pack that touched it.
+    /// line up the bones — but without it such a mesh cannot be replaced at all: `glider_basic`,
+    /// which several gliders are built on, fails every pack that touches it.
     /// </param>
     public static MeshChange Replace(
         AssetTypeValueField field, UnityMesh mesh, Func<string, long, long, byte[]?>? resource = null)

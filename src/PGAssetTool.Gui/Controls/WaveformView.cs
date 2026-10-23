@@ -1,7 +1,6 @@
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Media;
-using Avalonia.Threading;
 using PGAssetTool.Core.Preview;
 
 namespace PGAssetTool.Gui.Controls;
@@ -76,9 +75,9 @@ public sealed class WaveformView : Control
     /// Redraws while something is playing, and stops as soon as nothing is.
     ///
     /// Driven from the speaker rather than run all the time: a waveform is on the page whenever a
-    /// sound is selected, and a timer ticking behind every one of those would be a redraw a frame
-    /// for a line that is not moving.
-    private DispatcherTimer? _following;
+    /// sound is selected, and following behind every one of those would be a redraw a frame for a
+    /// line that is not moving.
+    private bool _following;
 
     protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
     {
@@ -90,24 +89,31 @@ public sealed class WaveformView : Control
     {
         base.OnDetachedFromVisualTree(e);
         Audio.Speaker.Changed -= Follow;
-        _following?.Stop();
-        _following = null;
+        _following = false;
     }
 
+    /// On the window's own frames, which is where the line is actually drawn. Asked for one at a
+    /// time: each frame asks for the next while the sound is still playing, so nothing is queued
+    /// behind a window that is covered or dragged. A model's clip plays the same way; see
+    /// PreviewViewModel.RequestFrame.
     private void Follow()
     {
         InvalidateVisual();
-        if (!Audio.Speaker.IsPlaying || _following is not null) return;
+        if (!Audio.Speaker.IsPlaying || _following) return;
+        if (TopLevel.GetTopLevel(this) is not { } window) return;
 
-        _following = new DispatcherTimer(TimeSpan.FromMilliseconds(33), DispatcherPriority.Render, (_, _) =>
+        _following = true;
+
+        void Frame(TimeSpan now)
         {
+            if (!_following) return;
+
             InvalidateVisual();
-            if (Audio.Speaker.IsPlaying) return;
+            if (!Audio.Speaker.IsPlaying) { _following = false; return; }
 
-            _following?.Stop();
-            _following = null;
-        });
+            window.RequestAnimationFrame(Frame);
+        }
 
-        _following.Start();
+        window.RequestAnimationFrame(Frame);
     }
 }

@@ -8,7 +8,7 @@ public sealed record StaleMod(InstalledMod Mod, IReadOnlyList<string> Bundles);
 /// Whether the game has been updated under the mods installed into it.
 ///
 /// An update replaces the bundles a mod was written into. The game then loads the new, unmodified
-/// ones, so every mod on them is simply not in the game any more — and nothing about the tool looked
+/// ones, so every mod on them is simply not in the game any more — and nothing about the tool looks
 /// wrong, because the ledger still lists them all as on.
 ///
 /// Noticed from what each mod already records: the hash of every bundle it wrote to, which a

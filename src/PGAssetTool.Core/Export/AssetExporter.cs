@@ -46,10 +46,9 @@ public sealed class AssetExporter(BundleSet bundles)
     /// `fileNameOverride` keeps distinct assets that share a name from overwriting each other's
     /// output; the caller knows which names repeat and can qualify them.
     ///
-    /// Only what can come back — a texture, a mesh, a sound. Everything else used to be written out
-    /// as a field dump and, where the bytes could go back, as a `.dat` beside it. Nothing read the
-    /// dumps, and a folder of files an author cannot act on reads as an invitation to try, so an
-    /// asset of any other class writes nothing — and leaves no empty folder behind for it either.
+    /// Only what can come back — a texture, a mesh, a sound. An asset of any other class writes
+    /// nothing, and leaves no empty folder behind for it either: a folder of files an author cannot
+    /// act on reads as an invitation to try.
     public IReadOnlyList<ExportedAsset> Export(
         string bundle, AssetsFileInstance file, AssetFileInfo info, string directory,
         string? fileNameOverride = null)
@@ -82,9 +81,9 @@ public sealed class AssetExporter(BundleSet bundles)
         catch (Exception e) when (e is not (IOException or UnauthorizedAccessException or OutOfMemoryException))
         {
             // One asset the game ships in a shape nothing here expected is that asset's loss, and is
-            // said so. It used to be the whole extract's: a single avatar mesh with two NaN normals
-            // left the item with no workspace at all. Trouble with the disk is still everybody's,
-            // because every file after it would fail the same way.
+            // said so. Thrown on instead it is the whole extract's: a single avatar mesh with two
+            // NaN normals leaves the item with no workspace at all. Trouble with the disk is
+            // everybody's, because every file after it would fail the same way.
             Failed.Add($"{name}: could not be written out ({e.GetType().Name}: {e.Message})");
             return [];
         }
@@ -200,7 +199,6 @@ public sealed class AssetExporter(BundleSet bundles)
         return true;
     }
 
-    /// A mesh that cannot be unpacked writes nothing rather than failing the export.
     /// Where each of the mesh's bones sits at rest, in the order the bind poses are in, or null for
     /// a mesh nothing skins or one whose rig cannot be read.
     private IReadOnlyList<float[]>? RestPoses(string bundle, long pathId, Meshes.UnityMesh mesh)
@@ -227,6 +225,7 @@ public sealed class AssetExporter(BundleSet bundles)
         }
     }
 
+    /// A mesh that cannot be unpacked writes nothing rather than failing the export.
     private ExportedAsset? ExportMesh(string bundle, long pathId, AssetTypeValueField field, string stem)
     {
         try

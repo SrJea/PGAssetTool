@@ -48,8 +48,8 @@ public static class GameProcess
     /// comes from the installation, so the candidates narrow to the processes carrying that name
     /// before anything is read at all, and there are usually none.
     ///
-    /// Falls back to the full sweep when the installation has no executable to name, so the answer
-    /// is never less certain than it was — only arrived at faster when it can be.
+    /// Falls back to the full sweep when the installation has no executable to name, so narrowing
+    /// the candidates only ever makes the same answer quicker to reach.
     public static bool IsRunning(GameInstallation game)
     {
         if (ExecutableName(game) is not { } name)
@@ -86,14 +86,12 @@ public static class GameProcess
     ///
     /// Unity names the two together: `Foo.exe` beside `Foo_Data`, and this installation already
     /// knows which folder that is. Asked that way round rather than by taking the first executable
-    /// that is not Unity's own crash handler, which is what both callers used to do separately: a
-    /// folder somebody has been modding holds whatever tools they have put there, and one of those
-    /// sorting first would have this looking for a process that is never running — which reads as
-    /// "the game is closed", the one answer here that must not be wrong — and would have the
-    /// launcher starting the tool instead of the game.
+    /// that is not Unity's own crash handler: a folder somebody has been modding holds whatever
+    /// tools they have put there, and one of those sorting first leaves this looking for a process
+    /// that is never running — which reads as "the game is closed", the one answer here that must
+    /// not be wrong — and the launcher starting the tool instead of the game.
     ///
-    /// The old rule stays as the fallback, so an installation laid out some other way is no worse
-    /// off than it was.
+    /// That rule is the fallback, for an installation laid out some other way.
     public static string? ExecutablePath(GameInstallation game)
     {
         lock (Executables)

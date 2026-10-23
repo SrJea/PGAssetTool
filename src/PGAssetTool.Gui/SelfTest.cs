@@ -1,4 +1,4 @@
-using AssetsTools.NET.Extra;
+﻿using AssetsTools.NET.Extra;
 using Avalonia;
 using Avalonia.Headless;
 using Avalonia.VisualTree;
@@ -135,9 +135,9 @@ internal static class SelfTest
             if (PGAssetTool.Core.Settings.ErrorLog.UntoldCrash() is not null)
                 return Fail("the same crash report would be announced again at the next start");
 
-            // Before anything, not after. This test writes to the game for real, and it used to ask
-            // this question only once it reached the manager — by which point it had already
-            // installed two mods into a game somebody was playing.
+            // Before anything, not after. This test writes to the game for real, so asking only on
+            // the way into the manager would mean two mods already installed into a game somebody
+            // is playing.
             if (model.Game is { } open && PGAssetTool.Core.Game.GameProcess.IsRunning(open))
                 return Fail("the game is running; close it before running a test that writes to it");
 
@@ -158,6 +158,7 @@ internal static class SelfTest
             Console.WriteLine($"weapons  {model.Weapons.Count}");
             if (model.Weapons.Count == 0) return Fail("the catalog produced no weapons");
 
+            if (EveryKindIsOffered(model) is { } kindsProblem) return Fail(kindsProblem);
             if (EveryKindOpens(model, scratch) is { } kindProblem) return Fail(kindProblem);
 
             if (WhichMeshIsTheWeapon(model) is { } wrongMesh) return Fail(wrongMesh);
@@ -226,8 +227,8 @@ internal static class SelfTest
                     if (clip.Frames == 0) return Fail($"'{node.Label}' decoded to no audio at all");
                     if (loudest <= 0) return Fail($"'{node.Label}' decoded to silence");
 
-                    // What the player is handed has to be a wave Windows will take; the exporter
-                    // used to produce one that declared itself empty.
+                    // What the player is handed has to be a wave Windows will take, rather than one
+                    // that declares itself empty.
                     var wave = clip.ToWave();
                     var again = PGAssetTool.Core.Import.Audio.WaveFile.Parse(wave, "the preview");
                     if (again.Frames != clip.Frames)
@@ -368,10 +369,10 @@ internal static class SelfTest
                     if (own.Count > 0 && !bands.Contains(0))
                         return Fail($"'{node.Label}' is drawn with textures and none of them is marked");
 
-                    // The address check, and the one the spelling bug failed: a texture in the same
-                    // file as the material naming it carries no bundle of its own, and while the
-                    // tree filled that in from the material the ordering did not, so every skin
-                    // failed to match anything and the whole band stayed empty.
+                    // The address check: a texture in the same file as the material naming it
+                    // carries no bundle of its own, and the tree fills that in from the material.
+                    // An ordering that does not leaves every skin matching nothing and the whole
+                    // band empty.
                     var brought = choices.Where((_, i) => bands[i] == 1).ToList();
                     if (brought.FirstOrDefault(c => !painted.Contains((c.Bundle, c.PathId))) is { } odd)
                         return Fail($"'{odd.Name}' was brought up as a skin and the tree files no such row");
@@ -380,15 +381,18 @@ internal static class SelfTest
                         return Fail("this weapon's skins paint it and none of them was brought up");
 
                     // Wearing a texture chosen by hand is how a skin gets tried on a model the
-                    // automatic answer knows nothing about. It silently did nothing: the choice
-                    // carried its picture, filling that in made a different value, and the combo
-                    // box dropped a selection it could no longer find in its own list.
+                    // automatic answer knows nothing about, and it fails silently: a choice that
+                    // carries its picture is a different value once that is filled in, and the
+                    // combo box drops a selection it cannot find in its own list.
                     if (model.Preview.TextureChoices.FirstOrDefault(c => c.PathId != 0) is { } wanted)
                     {
                         model.Preview.ChosenTexture = wanted;
                         WaitWhile(() => model.Preview.MeshTextures == slots, 30_000);
 
-                        var worn = model.Preview.MeshTextures;
+                        // The model's own submeshes. What is shown beside it keeps its own
+                        // pictures: a weapon's skin is cut for the weapon, and painted over
+                        // the arms as well it is a smear of the gun's paint on the hands.
+                        var worn = model.Preview.MeshTextures?.Take(model.Preview.Own).ToList();
                         Console.WriteLine($"         wearing '{wanted.Name}': "
                             + $"{(worn is null ? "nothing" : string.Join(", ", worn.Select(s => s is null ? "-" : $"{s.Width}x{s.Height}")))}");
 
@@ -426,8 +430,8 @@ internal static class SelfTest
                 if (!model.Preview.ShowAlpha) return Fail("an icon was shown with its alpha ignored");
 
                 // Automatic until somebody disagrees, and then their answer for everything after.
-                // Re-deciding per asset meant an icon came back with its alpha honoured however
-                // many times in a row it had just been turned off.
+                // Decided per asset, an icon comes back with its alpha honoured however many times
+                // in a row it has just been turned off.
                 model.ToggleAlphaCommand.Execute(null);
                 if (model.Preview.ShowAlpha) return Fail("the alpha toggle did not turn off");
 
@@ -483,10 +487,10 @@ internal static class SelfTest
                 return Fail("the filter is not being applied to the tree the window shows");
 
             // InputGesture only prints the shortcut beside the menu item; something has to register
-            // it. The first build shipped the former alone, so every key did nothing while the menu
-            // claimed otherwise. Then they were registered per menu item, which registers them when
-            // that item is built — and a menu's items are not built until it has been opened once,
-            // so every shortcut was still dead until its own menu had been pulled down.
+            // it, or every key does nothing while the menu claims otherwise. Registered per menu
+            // item it is registered when that item is built — and a menu's items are not built
+            // until it has been opened once, so every shortcut stays dead until its own menu has
+            // been pulled down.
             //
             // Asked of a window that has never been shown, let alone had a menu opened, and with
             // the commands checked rather than only the gestures: a binding that resolves to
@@ -564,8 +568,8 @@ internal static class SelfTest
             WaitWhile(() => model.Busy, 120_000);
 
             // Ctrl+R throws the reader away and starts over, which is the slowest thing the GUI
-            // does on purpose. It used to take fifteen seconds, nearly all of it rebuilding the
-            // CAB index through a class database loaded once per bundle.
+            // does on purpose. Most of it is rebuilding the CAB index, which is why that reads
+            // bundle directories rather than loading a class database per bundle.
             // The game can be named instead of found. Only Steam can be asked where it put the
             // game and it is not the only shop selling it, so a path that was given is taken as
             // given — pointed here at the very installation that was just detected, which is the
@@ -593,8 +597,8 @@ internal static class SelfTest
                 return Fail($"the run was pointed at '{game}' and is now on '{model.Game?.RootDirectory}'");
 
             // Searched, so the reload has something to put back wrongly. A reload happens under
-            // somebody in the middle of something — building a pack causes one — and it used to
-            // hand back the whole list while the search box still said what they had typed.
+            // somebody in the middle of something — building a pack causes one — and handing back
+            // the whole list leaves the search box saying what they typed over a list that ignores it.
             model.Search = "ultimatum";
             var narrowed = model.Weapons.Count;
 
@@ -698,8 +702,8 @@ internal static class SelfTest
             if (skins.Children.FirstOrDefault(s => s.Unread is null && s.Children.Count > 0) is { } repaint)
             {
                 // Selecting it, not opening it. Going down a weapon's eight skins to see what each
-                // looks like is the ordinary thing to do here, and it used to unfold every one of
-                // them into its materials and textures on the way past.
+                // looks like is the ordinary thing to do here, and opening each one unfolds it into
+                // its materials and textures on the way past.
                 model.Preview.Clear();
                 model.Detail.SelectedNode = repaint;
                 Arrived(model, ownMesh);
@@ -788,10 +792,20 @@ internal static class SelfTest
                 model.Preview.TextureChoices.Skip(1).Take(3).Select(t => t.Name)));
 
             // The first entry is "(automatic)"; the ones this mesh's own renderers name follow it.
-            var head = model.Preview.TextureChoices.Skip(1).Take(dressed).ToList();
-            if (head.Any(c => !inside.Any(n => n.Label == c.Name && n.PathId == c.PathId)))
+            //
+            // Counted off the list rather than off `MeshTextures`, which is what the renderer is
+            // given and now covers the whole item — the other meshes of the prefab and their
+            // pictures come after this mesh's. What is asked here is about the order of the offer:
+            // this mesh's own paint leads it and nothing else is in among them.
+            var afterAutomatic = model.Preview.TextureChoices.Skip(1).ToList();
+            var head = afterAutomatic
+                .TakeWhile(c => inside.Any(n => n.Label == c.Name && n.PathId == c.PathId))
+                .ToList();
+            Console.WriteLine($"skins    '{skinMesh.Label}' leads with {head.Count} of its own: "
+                + string.Join(", ", head.Select(c => c.Name)));
+            if (head.Count == 0)
                 return Fail("the textures at the top of the list are not the ones on the mesh: "
-                    + string.Join(", ", head.Select(c => c.Name)));
+                    + string.Join(", ", afterAutomatic.Take(3).Select(c => c.Name)));
 
             // And nothing else is promoted here. A repainting skin's paint is cut for the weapon's
             // own geometry, so on a mesh that arrived with a skin of its own it is no better an
@@ -809,10 +823,9 @@ internal static class SelfTest
                 return Fail($"opening it again read it again: {read} -> {withModel.Children.Count}");
 
             // A skin can paint the weapon and bring a model of its own, and such a row arrives with
-            // the paint already beneath it. Whether the model had been read was inferred from
-            // whether the row had anything under it at all, so exactly these skins — the ones with
-            // the most to show — never had their model read, and opening the row showed the paint
-            // and nothing else.
+            // the paint already beneath it. Read "has children, so it has been read" and exactly
+            // these skins — the ones with the most to show — never have their model read, and
+            // opening the row shows the paint and nothing else.
             if (skins.Children.FirstOrDefault(s => s.Unread is not null && !ReferenceEquals(s, withModel)
                     && s.Children.Count > 0) is { } both)
             {
@@ -971,6 +984,19 @@ internal static class SelfTest
             if (AnimationsGoOutAsAGlbAndComeBack(model) is { } glbProblem) return Fail(glbProblem);
             if (AMapGoesOutAsAGlb(model) is { } mapProblem) return Fail(mapProblem);
             if (OneMeshCanWearTwoPictures(model, model.WorkspaceRoot) is { } twoPaints) return Fail(twoPaints);
+            if (AnItemIsTheObjectTheGameLoads(model) is { } loadedProblem) return Fail(loadedProblem);
+            if (AnOutlineIsLeftOutWhicheverShapeItTakes(model) is { } shellProblem) return Fail(shellProblem);
+            if (AWeaponIsShownInTheArmsThatHoldIt(model) is { } armsProblem) return Fail(armsProblem);
+            if (AnItemIsPreviewedWhole(model) is { } wholeProblem) return Fail(wholeProblem);
+            if (PartsAreDrawnWhereTheGamePutsThem(model) is { } placedProblem) return Fail(placedProblem);
+            if (TheNameTablesAreKept(model) is { } namesProblem) return Fail(namesProblem);
+            if (TheRowIsPosedWhereItsPartsAre(model) is { } posedProblem) return Fail(posedProblem);
+            if (APartIsDrawnOnlyWhereTheItemIs(model) is { } apartProblem) return Fail(apartProblem);
+            if (TheArmsAnswerToTheSettingHoweverTheyAreNumbered(model) is { } numberedArms)
+                return Fail(numberedArms);
+            if (EverySubMeshShownWearsItsOwnTexture(model) is { } paintedProblem) return Fail(paintedProblem);
+            if (AClipIsGivenRoomToMoveIn(model) is { } roomProblem) return Fail(roomProblem);
+            if (AnotherKindGoesTheWholeWay(model, model.WorkspaceRoot) is { } otherKind) return Fail(otherKind);
 
             var texture = model.Editor.Files.FirstOrDefault(f => f.Name.EndsWith(".png"));
             if (texture is null) return Fail("no texture in the extracted workspace");
@@ -1017,14 +1043,13 @@ internal static class SelfTest
 
             // What was installed before this run touched anything. A test that writes to the game
             // has to leave it as it found it, and the only way to know that is to have looked
-            // first — an earlier version of this left a mod behind every time the workspace it
-            // happened to pick changed, and nothing noticed for days.
+            // first: a mod left behind is otherwise invisible from in here.
             var theirs = new PGAssetTool.Core.Mods.ModStore(model.Game!).Read();
             wasInstalled = theirs.Select(m => m.Id).ToHashSet();
 
-            // Their on-or-off state as well as their presence. Turning a mod on now turns off
-            // whatever else writes the same assets, and the author's own mods are within reach of
-            // that — so being left installed is no longer the whole of leaving them alone.
+            // Their on-or-off state as well as their presence. Turning a mod on turns off whatever
+            // else writes the same assets, and the author's own mods are within reach of that, so
+            // being left installed is not the whole of being left alone.
             wasEnabled = theirs.Where(m => m.Enabled).Select(m => m.Id).ToHashSet();
 
             // A second workspace, so what gets tested is the batch. Building and applying six packs
@@ -1097,9 +1122,9 @@ internal static class SelfTest
             if (installed.FirstOrDefault(m => m.Id == PackIdentity)?.PackPath is not { } dropped)
                 return Fail("the kept pack has no path to install from");
 
-            // A signed pack that no longer matches its signature stops and asks first. It used to
-            // be read only when a row was selected in the manager — after the game had been
-            // rewritten — so the one fact worth having before deciding arrived after the decision.
+            // A signed pack that no longer matches its signature stops and asks first. Read only
+            // when a row is selected in the manager — after the game has been rewritten — the one
+            // fact worth having before deciding arrives after the decision.
             var meddled = Path.Combine(scratch, "meddled-" + Path.GetFileName(dropped));
             var sealed_ = File.ReadAllBytes(dropped);
             if (sealed_.AsSpan().IndexOf("self test"u8) is var at and >= 0)
@@ -1195,7 +1220,7 @@ internal static class SelfTest
 
             // Before the window the tiles are counted in exists. Finding switches tabs and back, and
             // a tab switched back to is built again from nothing: counted straight afterwards, its
-            // tiles had not been laid out and every picture read as missing.
+            // tiles are not laid out yet and every picture reads as missing.
             if (OptionsCanBeClosedOnAShortScreen(model) is { } stuck) return Fail(stuck);
             if (FindingStaysInTheWorkspaceItIsAskedIn(model) is { } wandered) return Fail(wandered);
             if (AnEditToTheWeaponReachesItsDefaultSkin(model) is { } unpaired) return Fail(unpaired);
@@ -1309,10 +1334,10 @@ internal static class SelfTest
 
             // Only the bundles that were this mod's alone. Anything else installed and still on is
             // supposed to be left written, and a bundle two mods share is still written after one
-            // of them goes — asserting the whole game went vanilla passed only for as long as this
-            // test was the only thing installed, and asserting on every bundle it touched passed
-            // only for as long as nothing else touched the same ones. The author now has three
-            // dozen mods on, several of them in the bundle this test writes to.
+            // of them goes — so asserting that the whole game went vanilla holds only while this
+            // test is the only thing installed, and asserting on every bundle it touched only while
+            // nothing else touches the same ones. The author has three dozen mods on, several of
+            // them in the bundle this test writes to.
             var alsoWritten = model.Manager.Mods
                 .Where(m => m.Mod.Enabled && m.Mod.Id != PackIdentity)
                 .SelectMany(m => m.Mod.TouchedBundles.Keys)
@@ -1339,7 +1364,7 @@ internal static class SelfTest
 
             if (ModsAreFiledByWeaponAndLook(model) is { } filingProblem) return Fail(filingProblem);
 
-            // Now both, in one gesture. Removed through the manager rather than around it, so the
+            // Both at once, in one gesture. Removed through the manager rather than around it, so the
             // path a person actually takes is the one under test. This also puts the game back: it
             // is a test, not a change anyone asked for.
             foreach (var row in model.Manager.Mods.Where(m => mine.Contains(m.Mod.Id)))
@@ -1349,8 +1374,8 @@ internal static class SelfTest
 
             // With shift held, which is what turns Remove into Remove and delete. Removing on its
             // own deliberately leaves the kept pack so reinstalling does not depend on the
-            // workspace — right for a person, and wrong for a test that runs on every change:
-            // twenty copies of one had piled up in the mods folder before this existed.
+            // workspace — right for a person, and wrong for a test that runs on every change,
+            // which would pile up a copy of its pack in the mods folder per run.
             model.Manager.ShiftHeld = true;
             if (model.Manager.RemoveLabel != "Remove and delete")
                 return Fail($"with shift held the button still says '{model.Manager.RemoveLabel}'");
@@ -1405,8 +1430,8 @@ internal static class SelfTest
             if (model.Editor.Files.Single(f => f.RelativePath == texture.RelativePath).Edited)
                 return Fail("putting the file back should clear the mark");
 
-            // The workspace this run made a second time round is no longer wanted, which is the
-            // case the button exists for. Deleted through it rather than around it, so the path a
+            // The workspace this run made a second time round is finished with, which is the case
+            // the button exists for. Deleted through it rather than around it, so the path a
             // person takes is the one under test — and it leaves this run's scratch behind it.
             // Left until here, because it installs and removes once more of its own accord and
             // everything above wants the game in a state it put it in.
@@ -1550,9 +1575,9 @@ internal static class SelfTest
     ///
     /// Both are checked because they answer different questions. Refusing to build one stops this
     /// tool being what makes it. Refusing to apply one is what actually holds, because a pack built
-    /// by something else never went past the first check — so the second is made to face exactly
+    /// by something else never goes past the first check — so the second is made to face exactly
     /// that: a legitimate pack, opened afterwards, with the operation written into its manifest by
-    /// hand the way another tool would have written it.
+    /// hand the way another tool would write it.
     ///
     /// The rest of that pack still applies. A refusal that took everything down with it would make
     /// the honest answer cost more than no answer, and authors would route around it.
@@ -1684,8 +1709,8 @@ internal static class SelfTest
     ///
     /// The workspace is re-read whenever anything in it is written — saving the pack's own icon
     /// counts, and so does anything an image editor does — and each reading empties the lists the
-    /// panes are bound to on its way past, which used to take the view with it. That put the angle
-    /// back to square at the exact moment somebody had turned the model to the one they wanted.
+    /// panes are bound to on its way past. Taking the view with it puts the angle back to square at
+    /// the exact moment somebody has turned the model to the one they wanted.
     private static string? TheViewOutlivesAReading(MainViewModel model, Core.Pack.WorkspaceFile back)
     {
         if (model.Editor.Files.FirstOrDefault(f => f.Name.EndsWith(".glb")) is not { } model3d)
@@ -1707,7 +1732,7 @@ internal static class SelfTest
         if (model.Editor.Original.ChosenTexture != wearing)
             return "the halves are linked, and the game side did not take the same texture";
 
-        // The reading a save sets off, which is where the view used to be lost.
+        // The reading a save sets off, which is where a view that does not outlive it is lost.
         model.Editor.Refresh();
         Shows(model, model3d);
 
@@ -1745,12 +1770,7 @@ internal static class SelfTest
         return null;
     }
 
-    /// A kept pack goes in the folder its weapon and its look name, and the manager shows the same
-    /// arrangement.
-    ///
-    /// Two views of one thing that disagree are worse than either, so the check is that they do
-    /// not: the folder the file is in, and the folder the tree opens, are the same two names.
-    /// The folder standing at a path, wherever in the shelf it ended up.
+    /// The folder standing at a path, wherever in the shelf it sits.
     private static ModFolder? Folder(MainViewModel model, IReadOnlyList<string> at)
     {
         var found = new List<ModFolder>();
@@ -1765,6 +1785,11 @@ internal static class SelfTest
         return found.FirstOrDefault(f => f.At.SequenceEqual(at, StringComparer.OrdinalIgnoreCase));
     }
 
+    /// A kept pack goes in the folder its weapon and its look name, and the manager shows the same
+    /// arrangement.
+    ///
+    /// Two views of one thing that disagree are worse than either, so the check is that they do
+    /// not: the folder the file is in, and the folder the tree opens, are the same two names.
     private static string? ModsAreFiledByWeaponAndLook(MainViewModel model)
     {
         if (model.Manager.Mods.FirstOrDefault(m => m.Mod.Id == PackIdentity) is not { } row)
@@ -2038,8 +2063,6 @@ internal static class SelfTest
         }
     }
 
-    /// Selecting resolves off the UI thread, and Detail holds the previous weapon while it does —
-    /// so waiting for it to be non-null passes immediately on the wrong tree.
     /// Writes one texture with no alpha channel, reads it back through the importer and checks the
     /// original alpha survived. Answers null when it did.
     private static string? RoundTripWithoutAlpha(MainViewModel model)
@@ -2239,13 +2262,12 @@ internal static class SelfTest
     /// shown without a scene or a second mesh: evaluate the curves, walk the hierarchy, and the
     /// vertices follow.
     ///
-    /// Three things have to hold, and each of them was wrong at some point on the way here. The
-    /// model at rest has to be the model as it was read, which is what says the bind poses are being
-    /// composed the right way round — it was out by a metre and a half until the space was taken
-    /// from the model itself rather than from the renderer's transform. Something has to actually
-    /// move, which it did not while the one-bone-per-vertex rigging these weapons use was read as
-    /// having no weights at all. And it has to come back: a clip that ends somewhere else has been
-    /// evaluated past its end.
+    /// Three things have to hold. The model at rest has to be the model as it was read, which is
+    /// what says the bind poses are composed the right way round: taken from the renderer's
+    /// transform rather than from the model itself, it lands a metre and a half out. Something has
+    /// to actually move, which nothing does if the one-bone-per-vertex rigging these weapons use is
+    /// read as having no weights at all. And it has to come back: a clip that ends somewhere else
+    /// has been evaluated past its end.
     private static string? TheModelPlaysItsAnimations(MainViewModel model)
     {
         if (!Select(model, 16)) return "#16 never resolved, and it is the one with the clips";
@@ -2331,6 +2353,37 @@ internal static class SelfTest
         }
 
         return furthest;
+    }
+
+    /// The browser offers every kind the game has something in, weapons first.
+    ///
+    /// For months it offered weapons alone — the other kinds resolved through the same code and were
+    /// hidden in the window rather than taken out of the core — and this check said so. What it says
+    /// now is the opposite, because the command line never stopped reading them and people were
+    /// modding boots through it before the window would show one.
+    ///
+    /// Weapons first and selected, because that is what the tool is mostly for and what it opens on.
+    private static string? EveryKindIsOffered(MainViewModel model)
+    {
+        Console.WriteLine($"kinds    offered: {string.Join(", ", model.Kinds.Select(k => k.Name))}; "
+            + $"picker {(model.OffersKinds ? "shown" : "hidden")}; showing {model.Kind.Name}");
+
+        if (model.Kinds.Count == 0) return "the browser offers no kinds at all";
+        if (model.Kinds[0] != Core.Catalog.ItemKinds.Weapon)
+            return $"the browser opens on {model.Kinds[0].Name} rather than on weapons";
+        if (model.Kind != Core.Catalog.ItemKinds.Weapon)
+            return $"the browser is showing {model.Kind.Name} rather than weapons";
+
+        // Every kind in the registry, in the order the registry lists them. Fewer would mean one of
+        // them resolving nothing in this installation, which is worth hearing about rather than
+        // quietly leaving out of the picker.
+        var missing = Core.Catalog.ItemKinds.All.Where(k => !model.Kinds.Contains(k)).ToList();
+        if (missing.Count > 0)
+            return $"the browser leaves out {string.Join(", ", missing.Select(k => k.Name))}";
+
+        if (!model.OffersKinds) return "there is more than one kind and the picker is hidden";
+
+        return null;
     }
 
     /// Every kind the game has opens in the browser, and one that is not a weapon goes all the way
@@ -2490,11 +2543,10 @@ internal static class SelfTest
     /// replaced — because they can be.
     ///
     /// A weapon's chat icon and each skin's shop icon are registered against the weapon's number
-    /// rather than pointed at by anything in its prefab, so they arrive as paths and the whole group
-    /// of them used to go when the filter went on. They are textures an extract writes out and a
-    /// pack replaces, which is exactly what the filter promises to show; two per weapon were missing
-    /// from it. The row has to carry the object as well as the path, or it can be read and not
-    /// looked at.
+    /// rather than pointed at by anything in its prefab, so they arrive as paths and a filter that
+    /// drops paths drops the whole group of them. They are textures an extract writes out and a
+    /// pack replaces, which is exactly what the filter promises to show, and that is two per weapon.
+    /// The row has to carry the object as well as the path, or it can be read and not looked at.
     private static string? RelatedPicturesSurviveTheFilter(MainViewModel model)
     {
         static List<TreeNode> Rows(WeaponDetailViewModel detail)
@@ -2712,6 +2764,741 @@ internal static class SelfTest
         }
     }
 
+    /// An outline shell is left out whether it is the whole mesh or one submesh of it.
+    ///
+    /// Turbo Cat is drawn in the game the way the game draws anything cel-shaded: a copy of itself,
+    /// a little larger and inside out, shown as a silhouette. That copy is submesh 0 of its one
+    /// mesh, so a sum over the whole mesh buries it — the 752-triangle body's +579 against the
+    /// 504-triangle shell's -435 — and the shell is then drawn as a surface over the cat.
+    ///
+    /// Checked on three models, because the danger here is the opposite one. 58 items have a
+    /// submesh that leans inwards and almost all of them are a barrel's inside or a sight's back
+    /// face — parts that must go on being drawn. `gorgon_head` is the closest of those by lean
+    /// (-0.206 against Turbo Cat's -0.204) and has to stay unshelled; it is told apart by filling
+    /// a twentieth of the model where a shell fills all of it.
+    /// An item is previewed whole, whichever of its meshes the row stands for.
+    ///
+    /// Avatars are the case this is about: a head, a body and legs are three meshes of one prefab,
+    /// 120 of 120 of them, and a row at a time shows a fragment — `avatar_ programmer` is two slabs.
+    /// The assertion says that without having to know how many parts anything has: **two different
+    /// mesh rows of one avatar show the same model**, since each of them is a part of the same whole.
+    ///
+    /// With the arms off, because they are the other question and this one is not about them.
+    /// A part the item puts down more than once is drawn that many times, and an item whose model
+    /// is not under its own prefab is still drawn whole.
+    ///
+    /// Two shapes the game uses that one answer per mesh asset cannot show. A transport places one
+    /// wheel mesh ten times — 82 of the 90 of them place something more than once — so what is
+    /// drawn has to come to more than the sum of the item's distinct meshes. And an avatar's tier
+    /// shares a model: Bronze Hero's four parts hang under `avatar_lvl_65_hero`, which is not its
+    /// prefab's name, so asking for the prefab's name answers nothing and shows one mesh.
+    private static string? PartsAreDrawnWhereTheGamePutsThem(MainViewModel model)
+    {
+        var was = model.ShowArms;
+        var kind = model.Kind;
+
+        try
+        {
+            model.ShowArms = false;
+
+            if (!Select(model, Core.Catalog.ItemKinds.Transport, "royale_car_all_terrain_tank"))
+                return "the all-terrain tank could not be selected";
+            if (model.Detail is not { Tree: { } tank } tankDetail) return "selecting the tank left no tree";
+
+            var distinct = 0;
+            foreach (var mesh in tank.PrefabAssets.Where(a => a.Class == AssetClassID.Mesh))
+                if (MeshOf(model, tank, mesh) is { } read) distinct += read.VertexCount;
+
+            var wheels = Rows(tankDetail.Roots)
+                .FirstOrDefault(n => n.Class == AssetClassID.Mesh
+                    && n.Label.Contains("wheel", StringComparison.OrdinalIgnoreCase));
+            if (wheels is null) return "the tank lists no wheel to select";
+
+            tankDetail.SelectedNode = wheels;
+            if (!Arrived(model, wheels)) return $"'{wheels.Label}' never reached the preview";
+            if (model.Preview.Rest is not { } drawn) return $"'{wheels.Label}' showed no model";
+
+            Console.WriteLine($"placed   the tank is drawn with {drawn.VertexCount} vertices "
+                + $"against {distinct} in its distinct meshes");
+            if (drawn.VertexCount <= distinct)
+                return $"the tank is drawn with {drawn.VertexCount} vertices and its distinct meshes come "
+                    + $"to {distinct}: a wheel it places ten times is being drawn once";
+
+            if (!Select(model, Core.Catalog.ItemKinds.Avatar, "avatar_bronze_hero"))
+                return "'avatar_bronze_hero' could not be selected";
+            if (model.Detail is not { Tree: { } hero } heroDetail) return "selecting the avatar left no tree";
+
+            var parts = 0;
+            foreach (var mesh in hero.PrefabAssets.Where(a => a.Class == AssetClassID.Mesh))
+                if (MeshOf(model, hero, mesh) is { } read) parts += read.VertexCount;
+
+            var row = Rows(heroDetail.Roots).FirstOrDefault(n => n.Class == AssetClassID.Mesh);
+            if (row is null) return "Bronze Hero lists no mesh to select";
+
+            heroDetail.SelectedNode = row;
+            if (!Arrived(model, row)) return $"'{row.Label}' never reached the preview";
+            if (model.Preview.Rest is not { } whole) return $"'{row.Label}' showed no model";
+
+            Console.WriteLine($"placed   Bronze Hero is drawn with {whole.VertexCount} vertices "
+                + $"against {parts} in the four parts it is made of");
+            if (whole.VertexCount != parts)
+                return $"Bronze Hero is drawn with {whole.VertexCount} vertices and its parts come to "
+                    + $"{parts}: its model hangs under a name its prefab does not have, and the parts "
+                    + "are being left out";
+
+            return null;
+        }
+        finally
+        {
+            model.ShowArms = was;
+            if (model.Kind != kind)
+            {
+                model.Kind = kind;
+                WaitWhile(() => model.Weapons.Count == 0, 60_000);
+            }
+        }
+    }
+
+    /// One of an item's meshes as the preview reads it, or null for one that will not read.
+    private static Core.Export.Meshes.UnityMesh? MeshOf(
+        MainViewModel model, Core.Weapons.WeaponTree tree, Core.Assets.AssetNode mesh)
+    {
+        var bundle = mesh.Bundle.Length > 0 ? mesh.Bundle : tree.PrefabBundle;
+        if (bundle is null || model.Reader is not { } bundles) return null;
+        if (!Core.Preview.Skeleton.Drawn(bundles, bundle, mesh.PathId)) return null;
+        if (mesh.Name.StartsWith("vfx=", StringComparison.OrdinalIgnoreCase)) return null;
+
+        try
+        {
+            if (Core.Preview.AssetPreview.Locate(bundles, bundle, AssetClassID.Mesh, mesh.PathId, mesh.Name)
+                is not var (file, info)) return null;
+            var field = bundles.Context.Deserialize(file, info);
+            return field is null ? null : Core.Preview.AssetPreview.Mesh(field, bundles, bundle);
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
+    /// The name tables answer the same whether they were read from the game or from the copy kept
+    /// beside its backups.
+    ///
+    /// Eleven tables and sixteen thousand strings are a third of the wait before a window has a
+    /// list, and they change only when the game does — so they are kept, under a key made of the
+    /// language bundles' own hashes. What that key has to be worth is this: the same names, and a
+    /// table built against anything else ignored rather than believed.
+    private static string? TheNameTablesAreKept(MainViewModel model)
+    {
+        if (model.Reader is not { } bundles) return "there is no reader to ask";
+
+        var scratch = Path.Combine(Path.GetTempPath(), "pgassettool-selftest-names");
+        try
+        {
+            if (Directory.Exists(scratch)) Directory.Delete(scratch, recursive: true);
+
+            var items = Core.Catalog.ItemCatalog.Load(bundles);
+
+            var clock = System.Diagnostics.Stopwatch.StartNew();
+            var read = Core.Catalog.WeaponNames.Load(bundles, items, scratch);
+            var reading = clock.ElapsedMilliseconds;
+
+            clock.Restart();
+            var kept = Core.Catalog.WeaponNames.Load(bundles, items, scratch);
+            var keeping = clock.ElapsedMilliseconds;
+
+            Console.WriteLine($"names    {read.Count} in {reading}ms from the game, "
+                + $"{kept.Count} in {keeping}ms from the copy");
+            if (kept.Count != read.Count)
+                return $"the game's tables hold {read.Count} names and the kept copy {kept.Count}";
+
+            var weapon = items.Weapons.FirstOrDefault(w => read.For(w).Count > 1);
+            if (weapon is null) return "no weapon carries more than one name to compare";
+            if (!read.For(weapon).SequenceEqual(kept.For(weapon), StringComparer.Ordinal))
+                return $"'{weapon.Slug}' is {string.Join("/", read.For(weapon))} from the game "
+                    + $"and {string.Join("/", kept.For(weapon))} from the kept copy";
+
+            // Built against something else: the key says so, and what it names is read again.
+            var path = Path.Combine(scratch, "names.json");
+            File.WriteAllText(path, File.ReadAllText(path).Replace("weapons=", "weapons=9"));
+            if (Core.Catalog.WeaponNames.Load(bundles, items, scratch).Count != read.Count)
+                return "a table kept against another game was taken as this one's";
+
+            return null;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            return $"the kept tables could not be written: {e.Message}";
+        }
+        finally
+        {
+            try { if (Directory.Exists(scratch)) Directory.Delete(scratch, recursive: true); }
+            catch (Exception) { }
+        }
+    }
+
+    /// The model on the row is posed in the same arrangement as the parts drawn with it.
+    ///
+    /// A transport's prefab holds its parts twice — its own arrangement and the shop's — and the
+    /// two stand a metre apart. The parts are taken from the item's own root; the model on the row
+    /// is posed by `Skeleton.For`, which is a different walk of the same file, and the body coming
+    /// back from the shop's copy is a car hanging over its own wheels.
+    ///
+    /// Asked of the two walks rather than of the picture: they answer in the prefab's own space,
+    /// where the same placement is the same numbers.
+    ///
+    /// Two transports, because the walk splits: `royale_car_braided`'s body is a plain mesh and
+    /// `royale_car_backrooms_traveller`'s is skinned, and the shop's arrangement is reached by a
+    /// different path through `Skeleton.For` for each. The braided one also keeps its vertices in
+    /// the bundle's companion file, so a read that cannot reach one fails here too.
+    private static string? TheRowIsPosedWhereItsPartsAre(MainViewModel model)
+    {
+        var kind = model.Kind;
+
+        try
+        {
+            foreach (var slug in new[] { "royale_car_braided", "royale_car_backrooms_traveller" })
+            {
+                if (!Select(model, Core.Catalog.ItemKinds.Transport, slug))
+                    return $"'{slug}' could not be selected";
+                if (model.Detail is not { Tree: { } tree } || model.Reader is not { } bundles)
+                    return $"selecting '{slug}' left no tree to read";
+                if (tree.PrefabBundle is not { } prefabBundle
+                    || tree.PrefabPath is not { Length: > 0 } path)
+                    return $"'{slug}' has no prefab";
+                if (tree.MainMesh is not { } row) return $"'{slug}' has no model on its row";
+
+                var root = path[(path.LastIndexOf('/') + 1)..];
+                var bundle = row.Bundle.Length > 0 ? row.Bundle : prefabBundle;
+                if (MeshOf(model, tree, row) is not { } mesh) return $"'{slug}'s body will not read";
+
+                var places = Core.Preview.Skeleton.Every(bundles, bundle, row.PathId, whole: true);
+                var mine = places.FirstOrDefault(p =>
+                    string.Equals(p.Root, root, StringComparison.OrdinalIgnoreCase));
+                if (mine is null) return $"'{slug}'s body is placed nowhere under its own root";
+                if (places.Count < 2)
+                    return $"'{slug}'s body is placed once, so nothing says which arrangement won";
+
+                var posed = Core.Preview.Skeleton.For(bundles, bundle, row.PathId, root, whole: true);
+                if (posed is null) return $"'{slug}'s body on the row is posed by nothing";
+
+                var theirs = Core.Export.Meshes.MeshBounds.Of(mine.Skeleton.Placed(mesh, null, 0f)).Centre;
+                var ours = Core.Export.Meshes.MeshBounds.Of(posed.Placed(mesh, null, 0f)).Centre;
+                var away = MathF.Sqrt(
+                    MathF.Pow(ours.X - theirs.X, 2)
+                    + MathF.Pow(ours.Y - theirs.Y, 2)
+                    + MathF.Pow(ours.Z - theirs.Z, 2));
+
+                Console.WriteLine($"posed    {slug} sits {away:0.000} from where its own root puts "
+                    + $"it, of {places.Count} placements");
+                if (away > 0.001f)
+                    return $"'{slug}'s body on the row is posed {away:0.00} from where the item's own "
+                        + "root puts it: it is coming back from another arrangement of the same parts";
+            }
+
+            return null;
+        }
+        finally
+        {
+            if (model.Kind != kind)
+            {
+                model.Kind = kind;
+                WaitWhile(() => model.Weapons.Count == 0, 60_000);
+            }
+        }
+    }
+
+    /// A part is drawn only where the item it belongs to is.
+    ///
+    /// `magicbook_love` reaches the bullet it fires, and the bullet is placed under the projectile's
+    /// own hierarchy — a metre from the book, in the space the two are joined in. Drawn there it
+    /// costs the view: framing the book against a speck leaves the book a third of the picture.
+    ///
+    /// The book has two meshes and one of them is that bullet, so the claim is that what is shown
+    /// is the book's own geometry and no more.
+    private static string? APartIsDrawnOnlyWhereTheItemIs(MainViewModel model)
+    {
+        var was = model.ShowArms;
+        var kind = model.Kind;
+
+        try
+        {
+            model.ShowArms = false;
+            if (!Select(model, Core.Catalog.ItemKinds.Weapon, "magicbook_love"))
+                return "'magicbook_love' could not be selected";
+            if (model.Detail is not { Tree: { } tree } detail) return "selecting the book left no tree";
+
+            var assets = tree.PrefabAssets.Where(a => a.Class == AssetClassID.Mesh).ToList();
+            var book = assets.FirstOrDefault(a =>
+                a.Name.Equals("magicbook_love_mesh", StringComparison.OrdinalIgnoreCase));
+            var bullet = assets.FirstOrDefault(a =>
+                a.Name.Equals("magicbook_love_rocket", StringComparison.OrdinalIgnoreCase));
+            if (book is null || bullet is null)
+                return "the book no longer carries both its own mesh and the bullet it fires";
+            if (MeshOf(model, tree, book) is not { } alone) return "the book's own mesh will not read";
+
+            var row = Rows(detail.Roots).FirstOrDefault(n =>
+                n.Class == AssetClassID.Mesh && n.PathId == book.PathId);
+            if (row is null) return "the book lists no row for its own mesh";
+
+            detail.SelectedNode = row;
+            if (!Arrived(model, row)) return $"'{row.Label}' never reached the preview";
+            if (model.Preview.Rest is not { } drawn) return $"'{row.Label}' showed no model";
+
+            Console.WriteLine($"apart    the book is drawn with {drawn.VertexCount} vertices "
+                + $"against {alone.VertexCount} of its own");
+            return drawn.VertexCount == alone.VertexCount
+                ? null
+                : $"the book is drawn with {drawn.VertexCount} vertices and its own mesh has "
+                    + $"{alone.VertexCount}: the bullet it fires is being drawn where it is fired to";
+        }
+        finally
+        {
+            model.ShowArms = was;
+            if (model.Kind != kind)
+            {
+                model.Kind = kind;
+                WaitWhile(() => model.Weapons.Count == 0, 60_000);
+            }
+        }
+    }
+
+    /// The arms are the arms however the model numbers them.
+    ///
+    /// Two prefabs call them `Arms_Mesh001` rather than `Arms_Mesh` — the number is the exporter's,
+    /// and it is the same pair of hands. Read as the item's own part, they are shown with it and
+    /// the setting that turns them off does nothing.
+    private static string? TheArmsAnswerToTheSettingHoweverTheyAreNumbered(MainViewModel model)
+    {
+        var was = model.ShowArms;
+        var kind = model.Kind;
+
+        try
+        {
+            model.ShowArms = false;
+            if (!Select(model, Core.Catalog.ItemKinds.Weapon, "pencil_thrower_1"))
+                return "'pencil_thrower_1' could not be selected";
+            if (model.Detail is not { Tree: { } tree } detail) return "selecting the weapon left no tree";
+
+            var numbered = tree.PrefabAssets.FirstOrDefault(a => a.Class == AssetClassID.Mesh
+                && a.Name.Equals("Arms_Mesh001", StringComparison.OrdinalIgnoreCase));
+            var own = tree.PrefabAssets.FirstOrDefault(a => a.Class == AssetClassID.Mesh
+                && a.Name.Equals("pencil_thrower_mesh", StringComparison.OrdinalIgnoreCase));
+            if (numbered is null || own is null)
+                return "the weapon no longer carries its own mesh beside numbered arms";
+            if (MeshOf(model, tree, own) is not { } alone) return "the weapon's own mesh will not read";
+
+            var row = Rows(detail.Roots).FirstOrDefault(n =>
+                n.Class == AssetClassID.Mesh && n.PathId == own.PathId);
+            if (row is null) return "the weapon lists no row for its own mesh";
+
+            detail.SelectedNode = row;
+            if (!Arrived(model, row)) return $"'{row.Label}' never reached the preview";
+            if (model.Preview.Rest is not { } hidden) return $"'{row.Label}' showed no model";
+
+            Console.WriteLine($"numbered the weapon is drawn with {hidden.VertexCount} vertices "
+                + $"against {alone.VertexCount} of its own, arms off");
+            if (hidden.VertexCount != alone.VertexCount)
+                return $"the arms are off and the weapon is drawn with {hidden.VertexCount} vertices "
+                    + $"against {alone.VertexCount} of its own: '{numbered.Name}' is not being read "
+                    + "as the arms";
+
+            model.ShowArms = true;
+            if (!WaitWhile(() => ReferenceEquals(model.Preview.Rest, hidden), 60_000))
+                return "turning the arms on never showed anything different";
+
+            return model.Preview.Rest is { } shown && shown.VertexCount > hidden.VertexCount
+                ? null
+                : "the arms are on and the weapon is drawn no larger than on its own";
+        }
+        finally
+        {
+            model.ShowArms = was;
+            if (model.Kind != kind)
+            {
+                model.Kind = kind;
+                WaitWhile(() => model.Weapons.Count == 0, 60_000);
+            }
+        }
+    }
+
+    /// What is drawn wears one texture per submesh, in the order the submeshes are in.
+    ///
+    /// The renderer takes a texture per submesh of the model it is given, and the model is the
+    /// item's parts joined submesh by submesh. A renderer in the game can name more materials than
+    /// the mesh it draws has submeshes — `avatar_earth` names two over a one-submesh pair of arms —
+    /// and one texture too many puts every part after it in the wrong paint.
+    private static string? EverySubMeshShownWearsItsOwnTexture(MainViewModel model)
+    {
+        var kind = model.Kind;
+
+        try
+        {
+            if (!Select(model, Core.Catalog.ItemKinds.Avatar, "avatar_earth"))
+                return "'avatar_earth' could not be selected";
+            if (model.Detail is not { Tree: { } tree } detail) return "selecting the avatar left no tree";
+
+            var body = tree.PrefabAssets.FirstOrDefault(a => a.Class == AssetClassID.Mesh
+                && a.Name.Equals("avatar_earth_body_mesh", StringComparison.OrdinalIgnoreCase));
+            if (body is null) return "the avatar no longer carries a body mesh";
+
+            var row = Rows(detail.Roots).FirstOrDefault(n =>
+                n.Class == AssetClassID.Mesh && n.PathId == body.PathId);
+            if (row is null) return "the avatar lists no row for its body";
+
+            detail.SelectedNode = row;
+            if (!Arrived(model, row)) return $"'{row.Label}' never reached the preview";
+            if (model.Preview.Rest is not { } drawn) return $"'{row.Label}' showed no model";
+
+            var worn = model.Preview.MeshTextures?.Count ?? 0;
+            Console.WriteLine($"painted  the avatar is drawn in {drawn.SubMeshes.Count} submeshes "
+                + $"wearing {worn} textures");
+            return worn == drawn.SubMeshes.Count
+                ? null
+                : $"{drawn.SubMeshes.Count} submeshes are shown wearing {worn} textures: the parts "
+                    + "are wearing each other's";
+        }
+        finally
+        {
+            if (model.Kind != kind)
+            {
+                model.Kind = kind;
+                WaitWhile(() => model.Weapons.Count == 0, 60_000);
+            }
+        }
+    }
+
+    private static string? AnItemIsPreviewedWhole(MainViewModel model)
+    {
+        var was = model.ShowArms;
+        var kind = model.Kind;
+
+        try
+        {
+            model.ShowArms = false;
+            if (!Select(model, Core.Catalog.ItemKinds.Avatar, "avatar_ programmer"))
+                return "'avatar_ programmer' could not be selected";
+            if (model.Detail is not { } detail) return "selecting the avatar left no tree";
+
+            var meshes = Rows(detail.Roots).Where(n => n.Class == AssetClassID.Mesh).Take(2).ToList();
+            if (meshes.Count < 2)
+                return $"'avatar_ programmer' shows {meshes.Count} mesh row(s); this needs two to compare";
+
+            var shown = new List<Core.Export.Meshes.UnityMesh>();
+            foreach (var row in meshes)
+            {
+                detail.SelectedNode = row;
+                if (!Arrived(model, row)) return $"'{row.Label}' never reached the preview";
+                if (model.Preview.Rest is not { } whole) return $"'{row.Label}' showed no model";
+                shown.Add(whole);
+                Console.WriteLine($"whole    '{row.Label}' shows {whole.VertexCount} vertices "
+                    + $"in {whole.SubMeshes.Count} submeshes");
+            }
+
+            if (shown[0].VertexCount != shown[1].VertexCount)
+                return $"'{meshes[0].Label}' shows {shown[0].VertexCount} vertices and "
+                    + $"'{meshes[1].Label}' {shown[1].VertexCount}: an avatar's meshes are parts of one "
+                    + "model and each row is showing its own part rather than the whole";
+
+            return null;
+        }
+        finally
+        {
+            model.ShowArms = was;
+
+            // And back to the kind this started on. Everything after this check asks the browser for
+            // a weapon, and a browser left showing avatars has none to give — which is a
+            // "Sequence contains no matching element" a long way from here.
+            if (model.Kind != kind)
+            {
+                model.Kind = kind;
+                WaitWhile(() => model.Weapons.Count == 0, 60_000);
+            }
+        }
+    }
+
+    /// Every row of a tree, parents before children.
+    private static IEnumerable<TreeNode> Rows(IEnumerable<TreeNode> nodes)
+        => nodes.SelectMany(n => new[] { n }.Concat(Rows(n.Children)));
+
+    /// A weapon shown in the arms that hold it, which is how the game shows it.
+    ///
+    /// Three things have to be true at once: the pair has to be more than the gun (the arms are a
+    /// mesh of their own in the prefab), the view has to go on being framed by the gun (framing by
+    /// the pair shrinks every weapon to make room for a forearm), and the textures have to keep up
+    /// with the submeshes (the renderer takes one per submesh in order, so a short list paints the
+    /// arms with nothing and a misaligned one paints them with the gun's).
+    private static string? AWeaponIsShownInTheArmsThatHoldIt(MainViewModel model)
+    {
+        var was = model.ShowArms;
+
+        try
+        {
+            model.ShowArms = false;
+            if (!Select(model, Core.Catalog.ItemKinds.Weapon, "FirstShotgun"))
+                return "'FirstShotgun' could not be selected";
+            if (model.Detail is not { SelectedNode: { Class: AssetClassID.Mesh } opened })
+                return "selecting 'FirstShotgun' left no model on the row";
+            if (!Arrived(model, opened)) return "'FirstShotgun' never reached the preview";
+
+            var alone = model.Preview.Rest;
+            if (alone is null) return "the weapon on its own never reached the preview";
+            var slotsAlone = model.Preview.MeshTextures?.Count ?? 0;
+
+            // Waiting on the model being replaced rather than on "something is loaded": the row is
+            // already showing, so anything weaker is answered instantly by what is on screen.
+            model.ShowArms = true;
+            if (!WaitWhile(() => ReferenceEquals(model.Preview.Rest, alone), 60_000))
+                return "turning the arms on never showed anything different";
+
+            var together = model.Preview.Rest;
+            var framing = model.Preview.Framing;
+            if (together is null) return "the pair never reached the preview";
+            if (framing is null) return "nothing says what the view is framed by";
+
+            var slots = model.Preview.MeshTextures?.Count ?? 0;
+
+            Console.WriteLine($"arms     alone {alone.VertexCount} vertices in {alone.SubMeshes.Count} "
+                + $"submeshes ({slotsAlone} textures); together {together.VertexCount} in "
+                + $"{together.SubMeshes.Count} ({slots} textures); framed by {framing.VertexCount}");
+
+            if (together.VertexCount <= alone.VertexCount)
+                return "the arms are turned on and the model shown is no larger than the weapon alone";
+            if (together.SubMeshes.Count <= alone.SubMeshes.Count)
+                return "the pair is being shown as one submesh, so a texture cannot be put on each part";
+            if (slots < together.SubMeshes.Count)
+                return $"{together.SubMeshes.Count} submeshes are shown and only {slots} textures named, "
+                    + "so the parts past the end are painted with nothing";
+            if (framing.VertexCount >= together.VertexCount)
+                return "the view is framed by the pair rather than by the weapon";
+
+            // And back, because the arms are off by default and every check after this one was
+            // written against a weapon on its own.
+            model.ShowArms = false;
+            if (!WaitWhile(() => ReferenceEquals(model.Preview.Rest, together), 60_000))
+                return "turning the arms off again never showed anything different";
+
+            return model.Preview.Rest?.VertexCount == alone.VertexCount
+                ? null
+                : "turning the arms off did not put the weapon back as it was";
+        }
+        finally
+        {
+            model.ShowArms = was;
+        }
+    }
+
+    private static string? AnOutlineIsLeftOutWhicheverShapeItTakes(MainViewModel model)
+    {
+        var was = model.Kind;
+
+        Core.Export.Meshes.UnityMesh? Shown(Core.Catalog.ItemKind kind, string slug)
+        {
+            if (!Select(model, kind, slug)) return null;
+            if (model.Detail is not { } detail) return null;
+            if (detail.SelectedNode is not { Class: AssetClassID.Mesh } opened) return null;
+            return Arrived(model, opened) ? model.Preview.Rest : null;
+        }
+
+        try
+        {
+            var cat = Shown(Core.Catalog.ItemKinds.Pet, "pet_turbo_cat");
+            if (cat is null) return "'pet_turbo_cat' never reached the preview";
+
+            var gorgon = Shown(Core.Catalog.ItemKinds.Weapon, "gorgon_head");
+            if (gorgon is null) return "'gorgon_head' never reached the preview";
+
+            Console.WriteLine($"outline  'pet_turbo_cat' {cat.SubMeshes.Count} submeshes, shelled {cat.CarriesAnOutline}; "
+                + $"'gorgon_head' {gorgon.SubMeshes.Count} submeshes, shelled {gorgon.CarriesAnOutline}");
+
+            if (!cat.CarriesAnOutline)
+                return "'pet_turbo_cat' carries an outline as one of its submeshes and is drawn as though it does not";
+            if (gorgon.CarriesAnOutline)
+                return "'gorgon_head' has an inward-leaning part that is not a shell, and is being treated as one";
+
+            return null;
+        }
+        finally
+        {
+            if (model.Kind != was)
+            {
+                model.Kind = was;
+                WaitWhile(() => model.Weapons.Count == 0, 60_000);
+            }
+        }
+    }
+
+    /// An item is the object the game loads for its path, not the first one of that name.
+    ///
+    /// A name is not unique inside a bundle. Every one of the 50 pets that looked as though it
+    /// carried no model has two objects of its own name in its own bundle: the real one under
+    /// `Pets/Content/<id>` and an empty one under `Pets/Infos/<id>`. Searching by name took
+    /// whichever came first, so half the pets opened as four objects and no geometry — and three
+    /// weapons were quietly short of a mesh for the same reason.
+    ///
+    /// Checked on a pet rather than on a weapon because that is where it shows, and by name as well
+    /// as by count: the empty object is not merely smaller, it is a different object, and a check
+    /// that only counted could be satisfied by the wrong one growing.
+    private static string? AnItemIsTheObjectTheGameLoads(MainViewModel model)
+    {
+        const string slug = "pet_wolf";
+        var kind = Core.Catalog.ItemKinds.Pet;
+        var was = model.Kind;
+
+        try
+        {
+            if (!model.Kinds.Contains(kind)) return $"the window does not offer {kind.Name}";
+            if (!Select(model, kind, slug)) return $"'{slug}' could not be selected as a {kind.Name}";
+            if (model.Detail is not { } detail) return $"'{slug}' was selected and nothing was shown";
+
+            var tree = detail.Tree;
+            Console.WriteLine($"loaded   '{slug}': {tree.PrefabAssets.Count} objects in "
+                + $"{tree.PrefabBundle ?? "no bundle"}, model {tree.MainMesh?.Name ?? "none"}");
+
+            if (tree.MainMesh is null)
+                return $"'{slug}' resolved {tree.PrefabAssets.Count} objects and no model, which is the "
+                    + "empty one of the two objects of that name";
+            if (tree.MainMesh.Name != $"{slug}_mesh")
+                return $"'{slug}' resolved a model called '{tree.MainMesh.Name}'";
+
+            // And it is drawn, which is the whole point of resolving the right object.
+            if (detail.SelectedNode is not { Class: AssetClassID.Mesh } opened)
+                return $"'{slug}' did not open on its model";
+            if (!Arrived(model, opened)) return $"'{opened.Label}' never reached the preview";
+            if (model.Preview.Nothing is { } why) return $"'{opened.Label}': {why}";
+
+            Console.WriteLine($"loaded   preview {model.Preview.Caption}");
+            return null;
+        }
+        finally
+        {
+            if (model.Kind != was)
+            {
+                model.Kind = was;
+                WaitWhile(() => model.Weapons.Count == 0, 60_000);
+            }
+        }
+    }
+
+    /// A kind that is not a weapon goes the whole way: browsed, previewed, extracted, packed.
+    ///
+    /// Every kind is the same arrangement under different names, which is why there is one resolver
+    /// and one pack format — but the window offered weapons only for months, and in the meantime
+    /// people were modding boots through the command line, which never stopped reading them. So the
+    /// path they were already using had never been driven through the window's own view models.
+    ///
+    /// Boots, because they are the plainest of the other kinds: measured over all 47 of them, every
+    /// one resolves a bundle, a model and an icon, at 6ms each against a weapon's 38. What this adds
+    /// over the weapon run above is only what the kind changes — the picker, the list, a record with
+    /// no number, and a pack whose subject says `boots`.
+    ///
+    /// It stops at the pack rather than installing one. Applying is kind-blind: `ModApplier` reads
+    /// the subject for one thing only, which is `Relocation.Candidates` asking where the item's
+    /// assets are now, and that is checked here directly. The install, toggle and remove machinery
+    /// is the same code the weapon packs above drive through it.
+    private static string? AnotherKindGoesTheWholeWay(MainViewModel model, string root)
+    {
+        const string slug = "boots_black_dragon";
+        var kind = Core.Catalog.ItemKinds.Boots;
+        var (wasKind, wasWorkspace) = (model.Kind, model.Editor.SelectedWorkspace?.Directory);
+
+        if (!model.Kinds.Contains(kind)) return $"the window does not offer {kind.Name}";
+
+        try
+        {
+            if (!Select(model, kind, slug)) return $"'{slug}' could not be selected as a {kind.Name}";
+            if (model.Detail is not { } detail) return $"'{slug}' was selected and nothing was shown";
+
+            var tree = detail.Tree;
+            Console.WriteLine($"kinds    {model.Kinds.Count} offered; {kind.Name} has {model.Weapons.Count}, "
+                + $"'{slug}' is {tree.PrefabAssets.Count} objects in {tree.PrefabBundle ?? "no bundle"}, "
+                + $"icon {tree.Icon?.TextureName ?? "none"}");
+
+            if (tree.PrefabBundle is null) return $"'{slug}' resolved no bundle";
+            if (tree.MainMesh is null) return $"'{slug}' resolved no model";
+            if (tree.Icon is null) return $"'{slug}' resolved no icon";
+
+            // The window opens a weapon on its own model; the same has to happen for a kind whose
+            // records carry no number, since that is what the selection is matched on.
+            if (detail.SelectedNode is not { Class: AssetClassID.Mesh } opened)
+                return $"'{slug}' did not open on its model";
+            if (!Arrived(model, opened)) return $"'{opened.Label}' never reached the preview";
+            if (model.Preview.Nothing is { } why) return $"'{opened.Label}': {why}";
+
+            Console.WriteLine($"kinds    preview {model.Preview.Caption}");
+
+            model.ExtractWeaponCommand.Execute(null);
+            WaitWhile(() => model.Busy, 120_000);
+            if (model.LastExport is not { } directory || !Directory.Exists(directory))
+                return $"extracting '{slug}' wrote nothing: {model.Status}";
+
+            try
+            {
+                model.Editor.Rescan(root);
+                if (model.Editor.Workspaces.FirstOrDefault(w => w.Directory == directory) is not { } opened2)
+                    return $"the workspace extracted for '{slug}' did not appear in the editor";
+
+                model.Editor.SelectedWorkspace = opened2;
+                var manifest = Core.Pack.Workspace.Read(directory);
+
+                Console.WriteLine($"kinds    extracted {model.Editor.Files.Count} files, subject "
+                    + $"{manifest.Subject?.Kind ?? "none"}/{manifest.Subject?.Id ?? "none"}");
+
+                if (manifest.Subject?.Kind != kind.Pack)
+                    return $"the workspace says it is for '{manifest.Subject?.Kind}', not '{kind.Pack}'";
+
+                // Packing keeps only what differs from the export, so something has to differ.
+                if (manifest.Operations.FirstOrDefault(o => o.Source.EndsWith(".png")) is not { } texture)
+                    return $"the workspace for '{slug}' has no texture to edit";
+
+                var path = Path.Combine(directory, texture.Source);
+                File.WriteAllBytes(path, [.. File.ReadAllBytes(path), .. new byte[16]]);
+
+                var built = Core.Pack.PackBuilder.Build(
+                    directory, Path.Combine(directory, "boots.pgmod"), signer: null);
+
+                Console.WriteLine($"kinds    packed {built.Operations} operation(s), {built.Bytes:N0} bytes");
+                if (built.Operations != 1)
+                    return $"one file was edited and the pack holds {built.Operations} operations";
+
+                // Applying asks the subject one question: where this item's assets are now
+                // (Relocation.Candidates). It answers that by finding the item in the catalogues,
+                // and for a kind that is not a weapon that means its id against the registry's
+                // slug — a weapon is found by number, which this kind has none of. Checked here as
+                // the list in front of us, which holds the same records the catalogues would hand
+                // back, rather than by opening a second reader on the game to ask again.
+                var subject = Core.Pack.PackBuilder.ReadManifest(built.Path).Subject!;
+                var findable = model.Weapons.Any(w =>
+                    string.Equals(w.Record.Slug, subject.Id, StringComparison.OrdinalIgnoreCase));
+
+                Console.WriteLine($"kinds    the pack is for '{subject.Id}', which the {kind.Name} "
+                    + $"registry {(findable ? "has" : "does not have")}");
+
+                return findable
+                    ? null
+                    : $"the pack says it is for '{subject.Id}' and no {kind.Name} is filed under that id, "
+                        + "so applying it would have nowhere to look for its assets";
+            }
+            finally
+            {
+                try { Directory.Delete(directory, recursive: true); } catch (IOException) { }
+                model.Editor.Rescan(root);
+                model.Editor.SelectedWorkspace = wasWorkspace is null
+                    ? model.Editor.Workspaces.FirstOrDefault()
+                    : model.Editor.Workspaces.FirstOrDefault(w => w.Directory == wasWorkspace);
+            }
+        }
+        finally
+        {
+            // Back to weapons, which everything after this is about.
+            if (model.Kind != wasKind)
+            {
+                model.Kind = wasKind;
+                WaitWhile(() => model.Weapons.Count == 0, 60_000);
+            }
+        }
+    }
+
     /// A model whose one mesh wears two pictures wears both of them in the editor.
     ///
     /// #145's mesh is the gun in submesh 0 and its flashlight in submesh 1, painted `mp5Gold_map`
@@ -2769,9 +3556,8 @@ internal static class SelfTest
                     return $"'{mesh.Name}' has a submesh drawn in no picture at all";
 
                 // Two pictures, not the same one twice — compared by their pixels, because two
-                // readings of one file are two objects and the bug being checked for is exactly
-                // one picture read twice. Both sides of the comparison, since both dress the model
-                // and only one of them was ever looked at while this was wrong.
+                // readings of one file are two objects and one picture read twice is exactly what
+                // this is looking for. Both sides of the comparison, since both dress the model.
                 if (Alike(worn))
                     return $"'{mesh.Name}' wears two different pictures in the game and one here";
 
@@ -2962,12 +3748,12 @@ internal static class SelfTest
     /// A bundle written back comes back the same bundle, at either setting.
     ///
     /// The file the game loads is assembled here rather than by the library that knows the format —
-    /// the library's compressor is twenty-five times slower than the one used instead, and was
-    /// seventeen of the nineteen seconds an apply took. That makes the layout this tool's own
+    /// the library's compressor is twenty-five times slower than the one used instead, and is
+    /// seventeen of the nineteen seconds an apply would take. That makes the layout this tool's own
     /// problem: a header, a table of blocks, and a hundred-odd compressed blocks, in a format
     /// nothing in this repository documents. Reading one back and asking it what it holds is the
-    /// cheapest way to know it was assembled right, and the first attempt at it was wrong in a way
-    /// that would have left every modded bundle unreadable.
+    /// cheapest way to know it was assembled right, and anything wrong there leaves every modded
+    /// bundle unreadable.
     ///
     /// Both settings, because they differ in more than effort: a block compressed the quick way is
     /// flagged differently from one compressed thoroughly, and a block that would have grown is
@@ -3343,9 +4129,9 @@ internal static class SelfTest
 
     /// The pack details form keeps its buttons on the page in a window squeezed to its smallest.
     ///
-    /// It did not: the form is docked to the bottom of a column, and a window short enough simply
-    /// clipped it — Save and Revert went off the bottom with no way to reach them. Measured at the
-    /// smallest size the window will go to, because that is the case that failed.
+    /// The form is docked to the bottom of a column, and a window short enough clips it — Save and
+    /// Revert off the bottom with no way to reach them. Measured at the smallest size the window
+    /// will go to, which is the case that can fail.
     private static string? TheFormFitsASmallWindow(MainViewModel model)
     {
         var showing = model.Workspace;
@@ -3490,8 +4276,9 @@ internal static class SelfTest
             if (!skin.HasModel && files.Any(f => f.EndsWith(".glb")))
                 return $"'{skin.Name}' only repaints and a mesh was written for it";
 
-            // A skin that brings a model is masked by that model's UVs. It was masked by nothing:
-            // no mesh the weapon has draws its paint, so every texture of its own came out whole.
+            // A skin that brings a model is masked by that model's UVs: no mesh the weapon has
+            // draws its paint, so held against the weapon alone every texture of its own is left
+            // whole.
             if (skin.HasModel && model.MaskUnusedTextures)
             {
                 var paint = Core.Pack.Workspace.Read(directory).Operations
@@ -3508,8 +4295,9 @@ internal static class SelfTest
             }
 
             // Nothing of the other skins. Every skin's offer icon, profile and definition is filed
-            // against the same weapon, so all of them used to come out whichever one was asked for
-            // — seven sets of files an author has no reason to touch to change the eighth.
+            // against the same weapon, so taken by the weapon all of them come out whichever one
+            // was asked for — seven sets of files an author has no reason to touch to change the
+            // eighth.
             var alongside = Path.Combine(directory, "related");
             var others = (Directory.Exists(alongside)
                     ? Directory.GetFiles(alongside, "*", SearchOption.AllDirectories)
@@ -3530,8 +4318,8 @@ internal static class SelfTest
         }
 
         // Asked for again, the same skin gets a workspace of its own rather than writing over the
-        // one that is already there — which used to take an author's edits with it, and the
-        // manifest that said which mod their work was.
+        // one that is already there — which would take an author's edits with it, and the manifest
+        // that says which mod their work is.
         model.ChosenSkin = withModel;
         model.ExtractWeaponCommand.Execute(null);
         WaitWhile(() => model.Busy, 300_000);
@@ -3547,10 +4335,10 @@ internal static class SelfTest
 
         // Two looks of one weapon are two mods.
         //
-        // The id used to be the weapon's slug and nothing else, so every mod of a weapon was the
-        // same mod as far as the ledger went: installing a skin replaced the plain one, and
-        // installing somebody else's replaced yours — quietly, since replacing by id is how a mod
-        // is updated. Each extraction mints its own now, and says what it was made from.
+        // Each extraction mints its own id and says what it was made from. The weapon's slug and
+        // nothing else would make every mod of a weapon the same mod as far as the ledger goes:
+        // installing a skin would replace the plain one, and installing somebody else's would
+        // replace yours — quietly, since replacing by id is how a mod is updated.
         var manifests = written.Select(Core.Pack.Workspace.Read).ToList();
         Console.WriteLine($"skins    filed as {string.Join(" and ", manifests.Select(m => m.Id))}");
 
@@ -3734,9 +4522,9 @@ internal static class SelfTest
 
         try
         {
-            // Installing is the usual way a mod comes to be on, and it used to be the one route
-            // that claimed nothing: two skins for one weapon arrived both enabled, both writing the
-            // same texture, and only one of them was in the game.
+            // Installing is the usual way a mod comes to be on, and it claims its assets like any
+            // other route: two skins for one weapon both enabled write the same texture, and only
+            // one of them is in the game.
             applier.Install(rival, "self-test");
 
             Console.WriteLine("exclude  installing the rival stood down: "
@@ -3902,11 +4690,12 @@ internal static class SelfTest
 
     /// Normals kept as half floats come out as normals.
     ///
-    /// Unity pads a half-float normal to four components. It was kept four wide while the preview
-    /// read three a vertex, so every vertex after the first took its neighbours' components, and #14
-    /// Battle Shovel — with 54 other main meshes kept the same way — shaded in alternating light and
-    /// dark triangles. Nothing about that looks like a decoding fault from the outside: the shovel
-    /// was put down as a model built with its normals one way and its triangles the other.
+    /// Unity pads a half-float normal to four components. Kept four wide where everything reading
+    /// them takes three a vertex, every vertex after the first takes its neighbours' components, and
+    /// #14 Battle Shovel — with 54 other main meshes kept the same way — shades in alternating light
+    /// and dark triangles. Nothing about that looks like a decoding fault from the outside; it looks
+    /// like a model built with its normals one way and its triangles the other.
+    ///
     /// A normal read right is unit length and faces the way its triangle is wound.
     private static string? HalfFloatNormalsAreReadAsNormals(MainViewModel model)
     {
@@ -4065,6 +4854,58 @@ internal static class SelfTest
         return null;
     }
 
+    /// A clip that carries the model out of where it rests is given room to do it in.
+    ///
+    /// Most do not: measured over 1,150 clips the middle one moves the model a twelfth of its own
+    /// radius. The ones that do, do it wholeheartedly — #8's knife swings two and a half radii out
+    /// as it strikes — and framed by the rest pose they leave the picture and come back.
+    ///
+    /// So the frame is asked for, not the picture: what this checks is that choosing such a clip
+    /// widens it and putting the clip down gives it back.
+    private static string? AClipIsGivenRoomToMoveIn(MainViewModel model)
+    {
+        var was = model.Kind;
+
+        try
+        {
+            if (!Select(model, Core.Catalog.ItemKinds.Weapon, "Knife")) return "#8 could not be selected";
+            if (model.Detail is not { SelectedNode: { Class: AssetClassID.Mesh } opened })
+                return "selecting #8 left no model on the row";
+            if (!Arrived(model, opened)) return "#8 never reached the preview";
+
+            var preview = model.Preview;
+            if (preview.Framing is not { } resting) return "nothing says what the view is framed by";
+            if (preview.Clips.FirstOrDefault(c => c.Name.Equals("Shoot", StringComparison.OrdinalIgnoreCase))
+                is not { } swing) return $"#8 has no Shoot among {preview.Clips.Count} clip(s)";
+
+            var still = Core.Export.Meshes.MeshBounds.Of(resting).Radius;
+            preview.Clip = swing;
+            preview.Stop();
+
+            var playing = preview.Framing is { } room ? Core.Export.Meshes.MeshBounds.Of(room).Radius : 0f;
+            Console.WriteLine($"room     #8 Shoot: framed by {still:0.###} at rest, {playing:0.###} playing");
+
+            if (playing <= still * 1.05f)
+                return $"#8's Shoot swings well out of where the knife rests and the frame stayed at "
+                    + $"{still:0.###}, so most of it happens off the picture";
+
+            preview.Clip = null;
+            var back = preview.Framing is { } again ? Core.Export.Meshes.MeshBounds.Of(again).Radius : 0f;
+            return Math.Abs(back - still) < 0.001f
+                ? null
+                : $"putting the clip down left the frame at {back:0.###} rather than back at {still:0.###}";
+        }
+        finally
+        {
+            model.Preview.Clip = null;
+            if (model.Kind != was)
+            {
+                model.Kind = was;
+                WaitWhile(() => model.Weapons.Count == 0, 60_000);
+            }
+        }
+    }
+
     /// Whether the weapon a selection lands on can actually be decoded.
     ///
     /// Some meshes keep their vertices in the bundle's .resS rather than in the object, exactly as
@@ -4216,7 +5057,18 @@ internal static class SelfTest
         var lengths = (Game: editor.Original.Clip?.Motion.Length, Edited: editor.Edited.Clip?.Motion.Length);
         Console.WriteLine($"anim     playing {lengths.Game:0.00}s in the game against {lengths.Edited:0.00}s as edited");
         if (editor.Edited.Clip is null) return "the swapped animation does not play on the model";
-        if (lengths.Game == lengths.Edited) return "the edited side plays the same animation as the game";
+        // The length is the one thing that must *not* have changed — the game times the weapon by
+        // it — so what says the swap happened is the motion, not the clock. This check asked for
+        // the lengths to differ, which was right while a borrowed clip arrived at its own length
+        // and wrong from the moment the importer began fitting it, two commits later: it swapped
+        // #15's Reload in correctly and then failed for having done so.
+        if (Math.Abs((lengths.Game ?? 0) - (lengths.Edited ?? 0)) > 1e-3f)
+            return $"taking another item's Reload changed the clip from {lengths.Game:0.00}s to "
+                + $"{lengths.Edited:0.00}s, and the game reads that as how fast the weapon reloads";
+
+        if (editor.Original.Clip?.Motion is not { } played) return "the game side plays nothing to compare against";
+        if (Same(played, editor.Edited.Clip!.Motion))
+            return "the edited side plays the same animation as the game";
 
         Settle(editor.RestoreAnimationCommand.ExecuteAsync(null), "putting the Reload back");
         if (!before.AsSpan().SequenceEqual(File.ReadAllBytes(reload.FullPath)))
@@ -4320,10 +5172,65 @@ internal static class SelfTest
             () => !model.Preview.Caption.StartsWith($"{node.Label}   @ ", StringComparison.Ordinal),
             60_000);
 
+    /// Shows one weapon and waits for its own tree, by number.
+    ///
+    /// Selecting resolves off the UI thread and Detail holds the previous weapon while it does, so
+    /// waiting for Detail to be non-null passes immediately on the wrong tree.
     private static bool Select(MainViewModel model, int number)
     {
         model.Selected = model.Weapons.First(w => w.Record.GameNumber == number);
         return WaitWhile(() => model.Detail?.Tree.Record.GameNumber != number, 60_000);
+    }
+
+    /// Shows a kind and selects one item of it by the id its registry knows it as.
+    ///
+    /// By slug rather than by number, because a number is a weapon's: every other kind has zero.
+    private static bool Select(MainViewModel model, Core.Catalog.ItemKind kind, string slug)
+    {
+        if (model.Kind != kind)
+        {
+            model.Kind = kind;
+            if (!WaitWhile(() => model.Weapons.Count == 0, 60_000)) return false;
+        }
+
+        if (model.Weapons.FirstOrDefault(w =>
+                string.Equals(w.Record.Slug, slug, StringComparison.OrdinalIgnoreCase)) is not { } row)
+            return false;
+
+        model.Selected = row;
+        return WaitWhile(
+            () => !string.Equals(model.Detail?.Tree.Record.Slug, slug, StringComparison.OrdinalIgnoreCase),
+            60_000);
+    }
+
+    /// Whether two clips move the same things the same way, which is what says a swap landed.
+    ///
+    /// Sampled rather than compared curve by curve: a motion fitted to another length is the same
+    /// shape over a different clock, and a motion retargeted onto another rig keeps some curves and
+    /// drops others, so neither the key times nor the curve count is the question. Where the objects
+    /// actually are through the clip is.
+    private static bool Same(Core.Preview.Motion a, Core.Preview.Motion b)
+    {
+        foreach (var at in new[] { 0f, 0.25f, 0.5f, 0.75f, 1f })
+        {
+            var left = a.Pose(a.Length * at);
+            var right = b.Pose(b.Length * at);
+            if (left.Count != right.Count) return false;
+
+            foreach (var (path, there) in left)
+            {
+                if (!right.TryGetValue(path, out var here)) return false;
+                if (Apart(there.Position, here.Position) || Apart(there.Rotation, here.Rotation)
+                    || Apart(there.Scale, here.Scale)) return false;
+            }
+        }
+
+        return true;
+
+        static bool Apart(float[]? x, float[]? y)
+            => x is not null && y is not null
+                && x.Length == y.Length
+                && x.Where((v, i) => Math.Abs(v - y[i]) > 1e-4f).Any();
     }
 
     private static int CountRows(IEnumerable<TreeNode> nodes)
