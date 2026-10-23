@@ -87,6 +87,41 @@ public static class Facing
         return standing;
     }
 
+    /// How to stand up an item the game draws standing: an avatar, a transport, a glider.
+    ///
+    /// The bounding box cannot answer it. Sorting the sides puts the longest across the screen,
+    /// which is the barrel on a weapon and the height on an avatar — so `avatar_fortune_speaker`
+    /// opened lying on its side, head to the right, and a transport opened seen from above.
+    ///
+    /// These are not meshes standing on their own: a prefab places them where the game draws them,
+    /// and in that prefab's space Y is up. So the model is stood up by the prefab's own axes.
+    ///
+    /// Which side faces the viewer is the prefab's answer too, and the game does not give the same
+    /// one twice: a transport's nose and an avatar's face are not both the same way along Z. The
+    /// named angles are how a view is turned to the one that was wanted; this says which way is up.
+    /// <param name="home">
+    /// The matrix taking the prefab's space into the one this model's vertices are written in,
+    /// column-major — <see cref="Skeleton.Home"/>. Its first three columns are the prefab's own X,
+    /// Y and Z in that space.
+    /// </param>
+    public static MeshRenderer.Basis Upright(float[] home)
+    {
+        var right = Unit(0);
+        var up = Unit(1);
+        var forward = Unit(2);
+        if (up is (0, 0, 0)) return MeshRenderer.Basis.Identity;
+
+        return MeshRenderer.Basis.Of(
+            right.X, right.Y, right.Z, up.X, up.Y, up.Z, forward.X, forward.Y, forward.Z);
+
+        (float X, float Y, float Z) Unit(int column)
+        {
+            var (x, y, z) = (home[column * 4], home[column * 4 + 1], home[column * 4 + 2]);
+            var length = MathF.Sqrt(x * x + y * y + z * z);
+            return length > 0 ? (x / length, y / length, z / length) : (0, 0, 0);
+        }
+    }
+
     /// Where each landmark sits, in the space the mesh's own vertices are written in.
     ///
     /// The awkward part is that space. Vertices are written against whatever the model was parented

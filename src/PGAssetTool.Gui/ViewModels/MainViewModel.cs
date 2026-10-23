@@ -1158,6 +1158,80 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             : [.. places.Where(p => !hasOwn || !Somebody(p.Root))];
     }
 
+    /// A pair of boots is drawn as a pair.
+    ///
+    /// The game puts a boot on each foot as it dresses a player, and the prefab holds one boot — or
+    /// a left and a right that both stand in the same place. Measured over all 47: 44 carry one
+    /// mesh and three carry two, none carries more, and every one of them is centred within a
+    /// hundredth of x=0. So what the preview drew was one boot, or two boots inside each other.
+    ///
+    /// Nothing in the bundle says how far apart the feet go, so they are set side by side by the
+    /// boot's own width. The one on the row is drawn by the preview itself and cannot be moved, so
+    /// it is the other that steps across; where there is no other, it is this one mirrored, because
+    /// a boot is a left or a right and a pair is not two of the same.
+    private void Pair(
+        TreeNode node,
+        IReadOnlyList<(AssetNode Node, UnityMesh Mesh, List<Skeleton.Placement> Places)> found,
+        List<(UnityMesh Mesh, Skeleton Skeleton, bool Frames)> with,
+        List<PreviewImage?> wearing)
+    {
+        if (with.Count > 1) return;
+
+        var row = found.FirstOrDefault(f => f.Node.PathId == node.PathId);
+        if (row.Mesh is not { } standing || row.Places is not { Count: > 0 } places) return;
+
+        var box = MeshBounds.Of(places[0].Skeleton.Placed(standing, null, 0f));
+        if (box.Size.X <= 0) return;
+
+        if (with.Count == 1)
+        {
+            var (mesh, skeleton, frames) = with[0];
+            if (Beside(skeleton, mesh, 1f, box.Size.X, 0f) is { } aside)
+                with[0] = (aside, skeleton, frames);
+            return;
+        }
+
+        if (Beside(places[0].Skeleton, standing, -1f, box.Size.X, box.Centre.X) is not { } other) return;
+
+        with.Add((other, places[0].Skeleton, true));
+        wearing.AddRange(PerSubMesh(
+            TexturesFor(_tree!.MeshTextures.FirstOrDefault(m => m.MeshPathId == node.PathId)), standing));
+    }
+
+    /// The same mesh a step along the item's own X, mirrored where it has to become the other foot.
+    ///
+    /// Moved in the prefab's space, which is where the pair stands: the mesh is taken there, moved,
+    /// and brought back again, so a boot the prefab turns or scales steps along the axis it stands
+    /// on rather than along whichever way its own vertices happen to be written.
+    private static UnityMesh? Beside(
+        Skeleton skeleton, UnityMesh mesh, float facing, float step, float centre)
+    {
+        if (skeleton.Home(mesh) is not { } home) return null;
+
+        // Column-major, as everything here keeps them: x' = facing * x + step, mirrored about the
+        // plane the mesh's own middle stands on so that it turns over where it is.
+        float[] across =
+        [
+            facing, 0, 0, 0,
+            0, 1, 0, 0,
+            0, 0, 1, 0,
+            (facing < 0 ? 2 * centre : 0) + step, 0, 0, 1,
+        ];
+
+        return Skeleton.Moved(mesh, Matrix.Times(home, Matrix.Times(across, Matrix.Inverse(home))));
+    }
+
+    /// Which way up the model opens.
+    ///
+    /// A weapon by its muzzle, which the prefab's landmarks answer and the bounding box cannot.
+    /// Everything else standing the way the prefab hangs it: the box would sort an avatar's height
+    /// across the screen and lay it down. A mesh nothing in the prefab places has no prefab space
+    /// to borrow and is left to the box. See Facing.
+    private MeshRenderer.Basis Standing(TreeNode node, UnityMesh model, Skeleton? skeleton)
+        => _tree?.Record.Kind == ItemKinds.Weapon || skeleton?.Home(model) is not { } home
+            ? Facing.Standing(_bundles!, node.Bundle, skeleton?.Assembled(model) ?? model, node.PathId)
+            : Facing.Upright(home);
+
     /// Whether a root is the item's own prefab root.
     private bool Mine(string root)
         => string.Equals(root, PrefabRoot, StringComparison.OrdinalIgnoreCase);
@@ -1383,6 +1457,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                 // One part that will not read is a part not drawn. The model is still the model.
             }
         }
+
+        if (ItemKinds.Boots.Equals(_tree.Record.Kind)) Pair(node, found, with, wearing);
 
         return (with, wearing);
     }
@@ -1849,8 +1925,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                 // the prefab's space and taken back into this one before anything sees them, because
                 // a weapon's facing is read against landmarks that answer here. See PreviewViewModel.
                 var standing = loaded is UnityMesh model
-                    ? await Task.Run(() => Facing.Standing(
-                        _bundles!, node.Bundle, skeleton?.Assembled(model) ?? model, node.PathId))
+                    ? await Task.Run(() => Standing(node, model, skeleton))
                     : (MeshRenderer.Basis?)null;
 
                 switch (loaded)
