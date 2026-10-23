@@ -72,13 +72,14 @@ public sealed class Skeleton
         try { file = bundles.Open(bundle); }
         catch (Exception e) when (e is IOException or FileNotFoundException) { return null; }
 
-        foreach (var info in file.file.AssetInfos)
-        {
-            if (info.TypeId != (int)AssetClassID.SkinnedMeshRenderer) continue;
+        var read = Hierarchy.Of(bundles, file);
 
-            var renderer = bundles.Context.Deserialize(file, info);
+        foreach (var drawing in read.Drawn(meshPathId))
+        {
+            if (!drawing.Skinned) continue;
+
+            var renderer = read.Field(drawing.Info);
             if (renderer is null) continue;
-            if (renderer["m_Mesh"]["m_PathID"].AsLong != meshPathId) continue;
             if (under is not null && !RootedAt(bundles, file, renderer["m_GameObject"], under)) continue;
 
             var bones = renderer["m_Bones"]["Array"].Children
@@ -175,19 +176,14 @@ public sealed class Skeleton
     private static IEnumerable<(bool Skinned, AssetTypeValueField Renderer, long Transform)> Renderers(
         BundleSet bundles, AssetsFileInstance file, long meshPathId)
     {
-        foreach (var info in file.file.AssetInfos)
+        var read = Hierarchy.Of(bundles, file);
+
+        foreach (var drawing in read.Drawn(meshPathId))
         {
-            var skinned = info.TypeId == (int)AssetClassID.SkinnedMeshRenderer;
-            if (!skinned && info.TypeId != (int)AssetClassID.MeshFilter) continue;
+            if (drawing.Owner == 0 || read.Field(drawing.Info) is not { } field) continue;
 
-            var field = bundles.Context.Deserialize(file, info);
-            if (field is null || field["m_Mesh"]["m_PathID"].AsLong != meshPathId) continue;
-
-            var owner = field["m_GameObject"];
-            if (owner.IsDummy) continue;
-
-            var mine = TransformOf(bundles, file, owner["m_PathID"].AsLong);
-            if (mine != 0) yield return (skinned, field, mine);
+            var mine = read.TransformOf(drawing.Owner);
+            if (mine != 0) yield return (drawing.Skinned, field, mine);
         }
     }
 
@@ -212,30 +208,24 @@ public sealed class Skeleton
         try { file = bundles.Open(bundle); }
         catch (Exception e) when (e is IOException or FileNotFoundException) { return false; }
 
-        foreach (var info in file.file.AssetInfos)
+        var read = Hierarchy.Of(bundles, file);
+
+        foreach (var drawing in read.Drawn(meshPathId))
         {
-            var skinned = info.TypeId == (int)AssetClassID.SkinnedMeshRenderer;
-            if (!skinned && info.TypeId != (int)AssetClassID.MeshFilter) continue;
-
-            var field = bundles.Context.Deserialize(file, info);
-            if (field is null || field["m_Mesh"]["m_PathID"].AsLong != meshPathId) continue;
-
-            if (skinned)
+            if (drawing.Skinned)
             {
-                if (field["m_Enabled"].IsDummy || field["m_Enabled"].AsInt != 0) return true;
+                if (drawing.Enabled) return true;
                 continue;
             }
 
-            var owner = file.file.GetAssetInfo(field["m_GameObject"]["m_PathID"].AsLong);
-            var holder = owner is null ? null : bundles.Context.Deserialize(file, owner);
-            if (holder is null) continue;
+            if (read.Field(drawing.Owner) is not { } holder) continue;
 
             foreach (var component in holder["m_Component"]["Array"].Children)
             {
                 var id = component["component"]["m_PathID"].AsLong;
                 if (file.file.GetAssetInfo(id) is not { TypeId: (int)AssetClassID.MeshRenderer } found) continue;
 
-                var renderer = bundles.Context.Deserialize(file, found);
+                var renderer = read.Field(found);
                 if (renderer is null) continue;
                 if (renderer["m_Enabled"].IsDummy || renderer["m_Enabled"].AsInt != 0) return true;
             }
@@ -256,17 +246,16 @@ public sealed class Skeleton
     private static Skeleton? Unskinned(
         BundleSet bundles, AssetsFileInstance file, long meshPathId, string? under, bool whole = false)
     {
-        foreach (var info in file.file.AssetInfos)
-        {
-            if (info.TypeId != (int)AssetClassID.MeshFilter) continue;
+        var read = Hierarchy.Of(bundles, file);
 
-            var filter = bundles.Context.Deserialize(file, info);
-            if (filter is null || filter["m_Mesh"]["m_PathID"].AsLong != meshPathId) continue;
+        foreach (var drawing in read.Drawn(meshPathId))
+        {
+            if (drawing.Skinned || read.Field(drawing.Info) is not { } filter) continue;
 
             var owner = filter["m_GameObject"];
             if (under is not null && !RootedAt(bundles, file, owner, under)) continue;
 
-            var transform = owner.IsDummy ? 0 : TransformOf(bundles, file, owner["m_PathID"].AsLong);
+            var transform = drawing.Owner == 0 ? 0 : read.TransformOf(drawing.Owner);
             if (transform == 0) continue;
 
             return Build(bundles, file, [transform], transform, rigid: true, whole: whole);
@@ -298,39 +287,22 @@ public sealed class Skeleton
     /// could hold.
     private static List<string> Ancestry(BundleSet bundles, AssetsFileInstance file, long transform)
     {
+        var read = Hierarchy.Of(bundles, file);
         var names = new List<string>();
 
         for (var step = 0; transform != 0 && step < 64; step++)
         {
-            var info = file.file.GetAssetInfo(transform);
-            var field = info is null ? null : bundles.Context.Deserialize(file, info);
-            if (field is null) break;
+            if (read.Object(transform) is not { } node) break;
 
-            var holder = field["m_GameObject"];
-            if (!holder.IsDummy && file.file.GetAssetInfo(holder["m_PathID"].AsLong) is { } named)
-                names.Add(bundles.Context.NameOf(file, named));
-
-            var father = field["m_Father"];
-            transform = father.IsDummy ? 0 : father["m_PathID"].AsLong;
+            names.Add(node.Name);
+            transform = node.Parent;
         }
 
         return names;
     }
 
     private static long TransformOf(BundleSet bundles, AssetsFileInstance file, long gameObject)
-    {
-        var info = file.file.GetAssetInfo(gameObject);
-        var field = info is null ? null : bundles.Context.Deserialize(file, info);
-        if (field is null) return 0;
-
-        foreach (var component in field["m_Component"]["Array"].Children)
-        {
-            var id = component["component"]["m_PathID"].AsLong;
-            if (file.file.GetAssetInfo(id) is { TypeId: (int)AssetClassID.Transform }) return id;
-        }
-
-        return 0;
-    }
+        => Hierarchy.Of(bundles, file).TransformOf(gameObject);
 
     /// Walks up from each bone to the top, so every transform between them is present and a parent
     /// always comes before its children.
@@ -350,6 +322,7 @@ public sealed class Skeleton
         BundleSet bundles, AssetsFileInstance file, IReadOnlyList<long> bones, long renderer,
         bool rigid = false, bool whole = false)
     {
+        var read = Hierarchy.Of(bundles, file);
         var joints = new List<Joint>();
         var at = new Dictionary<long, int>();
 
@@ -357,25 +330,15 @@ public sealed class Skeleton
         {
             if (at.TryGetValue(transform, out var known)) return known;
 
-            var info = file.file.GetAssetInfo(transform);
-            var field = info is null ? null : bundles.Context.Deserialize(file, info);
-            if (field is null) return -1;
+            if (read.Object(transform) is not { } node) return -1;
 
-            var father = field["m_Father"];
-            var parent = father.IsDummy || father["m_PathID"].AsLong == 0
-                ? -1
-                : Add(father["m_PathID"].AsLong);
+            var parent = node.Parent == 0 ? -1 : Add(node.Parent);
 
             // After the parent, always: everything downstream reads this list in order and expects
             // to have seen whoever it hangs off already.
-            var owner = field["m_GameObject"];
-            var named = owner.IsDummy ? null : file.file.GetAssetInfo(owner["m_PathID"].AsLong);
-            var name = (named is null ? null : bundles.Context.Deserialize(file, named))?["m_Name"].AsString
-                ?? "?";
+            var path = parent >= 0 ? $"{joints[parent].Path}/{node.Name}" : node.Name;
 
-            var path = parent >= 0 ? $"{joints[parent].Path}/{name}" : name;
-
-            joints.Add(new Joint(name, path, parent, Trs(field)));
+            joints.Add(new Joint(node.Name, path, parent, node.Local));
             return at[transform] = joints.Count - 1;
         }
 
@@ -397,19 +360,10 @@ public sealed class Skeleton
             // A hierarchy that points at itself would otherwise be walked for ever. The deepest
             // rig measured in this game is 78 objects, so this is far above anything real.
             if (depth > 64) return;
+            if (read.Object(transform) is not { } node) return;
 
-            var info = file.file.GetAssetInfo(transform);
-            var field = info is null ? null : bundles.Context.Deserialize(file, info);
-            if (field is null) return;
-
-            var children = field["m_Children"];
-            if (children.IsDummy) return;
-
-            foreach (var child in children["Array"].Children)
+            foreach (var id in node.Children)
             {
-                var id = child["m_PathID"].AsLong;
-                if (id == 0) continue;
-
                 // Already a joint from the walk up, or added now. Either way it is descended into:
                 // the objects a clip drives hang below bones as often as beside them.
                 if (!at.ContainsKey(id) && Add(id) < 0) continue;
