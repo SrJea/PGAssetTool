@@ -56,7 +56,8 @@ public sealed class Skeleton
     ///
     /// Several renderers draw the same mesh and they disagree: a weapon's own prefab holds one, and
     /// the `<prefab>_info` prefab the game's shop shows holds another, arranged its own way — which
-    /// is where #943's two swords are crossed. Whichever of them comes first in the bundle is what
+    /// is where #943's two swords are crossed, and where a transport's body comes back standing a
+    /// metre from its own wheels. Whichever of them comes first in the bundle is what
     /// answering by mesh alone gives, and that is an accident of file order. Naming the root is how
     /// a caller says which arrangement it means.
     /// </param>
@@ -78,7 +79,7 @@ public sealed class Skeleton
             var renderer = bundles.Context.Deserialize(file, info);
             if (renderer is null) continue;
             if (renderer["m_Mesh"]["m_PathID"].AsLong != meshPathId) continue;
-            if (under is not null && !Beneath(bundles, file, renderer["m_GameObject"], under)) continue;
+            if (under is not null && !RootedAt(bundles, file, renderer["m_GameObject"], under)) continue;
 
             var bones = renderer["m_Bones"]["Array"].Children
                 .Select(b => b["m_PathID"].AsLong)
@@ -95,7 +96,7 @@ public sealed class Skeleton
             return Build(bundles, file, bones, mine, whole: whole);
         }
 
-        return Unskinned(bundles, file, meshPathId, whole);
+        return Unskinned(bundles, file, meshPathId, under, whole);
     }
 
     /// One place a mesh is drawn: the renderer that draws it there, as a skeleton, and the name of
@@ -248,8 +249,12 @@ public sealed class Skeleton
     /// A MeshFilter names the mesh, and a clip moves the MeshFilter's own transform by name, so that
     /// transform is the one bone and every vertex rides on it. #8's Old Combat Knife skin is built
     /// this way: its blade is a plain mesh that five clips of its own swing about.
+    ///
+    /// `under` means here what it means above, and it matters most here: the parts of a transport
+    /// are plain meshes, each put down several times over two arrangements, so the first filter in
+    /// the file is a wheel of the shop's copy as often as not.
     private static Skeleton? Unskinned(
-        BundleSet bundles, AssetsFileInstance file, long meshPathId, bool whole = false)
+        BundleSet bundles, AssetsFileInstance file, long meshPathId, string? under, bool whole = false)
     {
         foreach (var info in file.file.AssetInfos)
         {
@@ -259,8 +264,10 @@ public sealed class Skeleton
             if (filter is null || filter["m_Mesh"]["m_PathID"].AsLong != meshPathId) continue;
 
             var owner = filter["m_GameObject"];
+            if (under is not null && !RootedAt(bundles, file, owner, under)) continue;
+
             var transform = owner.IsDummy ? 0 : TransformOf(bundles, file, owner["m_PathID"].AsLong);
-            if (transform == 0) return null;
+            if (transform == 0) continue;
 
             return Build(bundles, file, [transform], transform, rigid: true, whole: whole);
         }
@@ -268,12 +275,20 @@ public sealed class Skeleton
         return null;
     }
 
-    /// Whether this object hangs somewhere under one of the given name.
-    private static bool Beneath(
+    /// Whether this object's hierarchy is the one of the given name, read at its top.
+    ///
+    /// The top rather than any step of the chain, because the game names the two arrangements of an
+    /// item after the item: `royale_car_braided`'s body hangs under an object of its own name in
+    /// both, and the shop's — `royale_car_braided < royale_car_braided_shop` — answers a test that
+    /// asks whether the name appears anywhere above. Its body stands 2.76 higher than the item's
+    /// own, so taken for the item's it is a car floating over its own wheels. `Placement.Root`
+    /// reads the same end of the same chain.
+    private static bool RootedAt(
         BundleSet bundles, AssetsFileInstance file, AssetTypeValueField owner, string root)
         => !owner.IsDummy
             && Ancestry(bundles, file, TransformOf(bundles, file, owner["m_PathID"].AsLong))
-                .Any(n => string.Equals(n, root, StringComparison.OrdinalIgnoreCase));
+                is { Count: > 0 } names
+            && string.Equals(names[^1], root, StringComparison.OrdinalIgnoreCase);
 
     /// The names of this transform's own object and of every object above it, the top last.
     ///

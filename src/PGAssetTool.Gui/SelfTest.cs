@@ -988,6 +988,11 @@ internal static class SelfTest
             if (AWeaponIsShownInTheArmsThatHoldIt(model) is { } armsProblem) return Fail(armsProblem);
             if (AnItemIsPreviewedWhole(model) is { } wholeProblem) return Fail(wholeProblem);
             if (PartsAreDrawnWhereTheGamePutsThem(model) is { } placedProblem) return Fail(placedProblem);
+            if (TheRowIsPosedWhereItsPartsAre(model) is { } posedProblem) return Fail(posedProblem);
+            if (APartIsDrawnOnlyWhereTheItemIs(model) is { } apartProblem) return Fail(apartProblem);
+            if (TheArmsAnswerToTheSettingHoweverTheyAreNumbered(model) is { } numberedArms)
+                return Fail(numberedArms);
+            if (EverySubMeshShownWearsItsOwnTexture(model) is { } paintedProblem) return Fail(paintedProblem);
             if (AClipIsGivenRoomToMoveIn(model) is { } roomProblem) return Fail(roomProblem);
             if (AnotherKindGoesTheWholeWay(model, model.WorkspaceRoot) is { } otherKind) return Fail(otherKind);
 
@@ -2866,11 +2871,242 @@ internal static class SelfTest
             if (Core.Preview.AssetPreview.Locate(bundles, bundle, AssetClassID.Mesh, mesh.PathId, mesh.Name)
                 is not var (file, info)) return null;
             var field = bundles.Context.Deserialize(file, info);
-            return field is null ? null : Core.Export.Meshes.UnityMesh.Read(field);
+            return field is null ? null : Core.Preview.AssetPreview.Mesh(field, bundles, bundle);
         }
         catch (Exception)
         {
             return null;
+        }
+    }
+
+    /// The model on the row is posed in the same arrangement as the parts drawn with it.
+    ///
+    /// A transport's prefab holds its parts twice — its own arrangement and the shop's — and the
+    /// two stand a metre apart. The parts are taken from the item's own root; the model on the row
+    /// is posed by `Skeleton.For`, which is a different walk of the same file, and the body coming
+    /// back from the shop's copy is a car hanging over its own wheels.
+    ///
+    /// Asked of the two walks rather than of the picture: they answer in the prefab's own space,
+    /// where the same placement is the same numbers.
+    ///
+    /// Two transports, because the walk splits: `royale_car_braided`'s body is a plain mesh and
+    /// `royale_car_backrooms_traveller`'s is skinned, and the shop's arrangement is reached by a
+    /// different path through `Skeleton.For` for each. The braided one also keeps its vertices in
+    /// the bundle's companion file, so a read that cannot reach one fails here too.
+    private static string? TheRowIsPosedWhereItsPartsAre(MainViewModel model)
+    {
+        var kind = model.Kind;
+
+        try
+        {
+            foreach (var slug in new[] { "royale_car_braided", "royale_car_backrooms_traveller" })
+            {
+                if (!Select(model, Core.Catalog.ItemKinds.Transport, slug))
+                    return $"'{slug}' could not be selected";
+                if (model.Detail is not { Tree: { } tree } || model.Reader is not { } bundles)
+                    return $"selecting '{slug}' left no tree to read";
+                if (tree.PrefabBundle is not { } prefabBundle
+                    || tree.PrefabPath is not { Length: > 0 } path)
+                    return $"'{slug}' has no prefab";
+                if (tree.MainMesh is not { } row) return $"'{slug}' has no model on its row";
+
+                var root = path[(path.LastIndexOf('/') + 1)..];
+                var bundle = row.Bundle.Length > 0 ? row.Bundle : prefabBundle;
+                if (MeshOf(model, tree, row) is not { } mesh) return $"'{slug}'s body will not read";
+
+                var places = Core.Preview.Skeleton.Every(bundles, bundle, row.PathId, whole: true);
+                var mine = places.FirstOrDefault(p =>
+                    string.Equals(p.Root, root, StringComparison.OrdinalIgnoreCase));
+                if (mine is null) return $"'{slug}'s body is placed nowhere under its own root";
+                if (places.Count < 2)
+                    return $"'{slug}'s body is placed once, so nothing says which arrangement won";
+
+                var posed = Core.Preview.Skeleton.For(bundles, bundle, row.PathId, root, whole: true);
+                if (posed is null) return $"'{slug}'s body on the row is posed by nothing";
+
+                var theirs = Core.Export.Meshes.MeshBounds.Of(mine.Skeleton.Placed(mesh, null, 0f)).Centre;
+                var ours = Core.Export.Meshes.MeshBounds.Of(posed.Placed(mesh, null, 0f)).Centre;
+                var away = MathF.Sqrt(
+                    MathF.Pow(ours.X - theirs.X, 2)
+                    + MathF.Pow(ours.Y - theirs.Y, 2)
+                    + MathF.Pow(ours.Z - theirs.Z, 2));
+
+                Console.WriteLine($"posed    {slug} sits {away:0.000} from where its own root puts "
+                    + $"it, of {places.Count} placements");
+                if (away > 0.001f)
+                    return $"'{slug}'s body on the row is posed {away:0.00} from where the item's own "
+                        + "root puts it: it is coming back from another arrangement of the same parts";
+            }
+
+            return null;
+        }
+        finally
+        {
+            if (model.Kind != kind)
+            {
+                model.Kind = kind;
+                WaitWhile(() => model.Weapons.Count == 0, 60_000);
+            }
+        }
+    }
+
+    /// A part is drawn only where the item it belongs to is.
+    ///
+    /// `magicbook_love` reaches the bullet it fires, and the bullet is placed under the projectile's
+    /// own hierarchy — a metre from the book, in the space the two are joined in. Drawn there it
+    /// costs the view: framing the book against a speck leaves the book a third of the picture.
+    ///
+    /// The book has two meshes and one of them is that bullet, so the claim is that what is shown
+    /// is the book's own geometry and no more.
+    private static string? APartIsDrawnOnlyWhereTheItemIs(MainViewModel model)
+    {
+        var was = model.ShowArms;
+        var kind = model.Kind;
+
+        try
+        {
+            model.ShowArms = false;
+            if (!Select(model, Core.Catalog.ItemKinds.Weapon, "magicbook_love"))
+                return "'magicbook_love' could not be selected";
+            if (model.Detail is not { Tree: { } tree } detail) return "selecting the book left no tree";
+
+            var assets = tree.PrefabAssets.Where(a => a.Class == AssetClassID.Mesh).ToList();
+            var book = assets.FirstOrDefault(a =>
+                a.Name.Equals("magicbook_love_mesh", StringComparison.OrdinalIgnoreCase));
+            var bullet = assets.FirstOrDefault(a =>
+                a.Name.Equals("magicbook_love_rocket", StringComparison.OrdinalIgnoreCase));
+            if (book is null || bullet is null)
+                return "the book no longer carries both its own mesh and the bullet it fires";
+            if (MeshOf(model, tree, book) is not { } alone) return "the book's own mesh will not read";
+
+            var row = Rows(detail.Roots).FirstOrDefault(n =>
+                n.Class == AssetClassID.Mesh && n.PathId == book.PathId);
+            if (row is null) return "the book lists no row for its own mesh";
+
+            detail.SelectedNode = row;
+            if (!Arrived(model, row)) return $"'{row.Label}' never reached the preview";
+            if (model.Preview.Rest is not { } drawn) return $"'{row.Label}' showed no model";
+
+            Console.WriteLine($"apart    the book is drawn with {drawn.VertexCount} vertices "
+                + $"against {alone.VertexCount} of its own");
+            return drawn.VertexCount == alone.VertexCount
+                ? null
+                : $"the book is drawn with {drawn.VertexCount} vertices and its own mesh has "
+                    + $"{alone.VertexCount}: the bullet it fires is being drawn where it is fired to";
+        }
+        finally
+        {
+            model.ShowArms = was;
+            if (model.Kind != kind)
+            {
+                model.Kind = kind;
+                WaitWhile(() => model.Weapons.Count == 0, 60_000);
+            }
+        }
+    }
+
+    /// The arms are the arms however the model numbers them.
+    ///
+    /// Two prefabs call them `Arms_Mesh001` rather than `Arms_Mesh` — the number is the exporter's,
+    /// and it is the same pair of hands. Read as the item's own part, they are shown with it and
+    /// the setting that turns them off does nothing.
+    private static string? TheArmsAnswerToTheSettingHoweverTheyAreNumbered(MainViewModel model)
+    {
+        var was = model.ShowArms;
+        var kind = model.Kind;
+
+        try
+        {
+            model.ShowArms = false;
+            if (!Select(model, Core.Catalog.ItemKinds.Weapon, "pencil_thrower_1"))
+                return "'pencil_thrower_1' could not be selected";
+            if (model.Detail is not { Tree: { } tree } detail) return "selecting the weapon left no tree";
+
+            var numbered = tree.PrefabAssets.FirstOrDefault(a => a.Class == AssetClassID.Mesh
+                && a.Name.Equals("Arms_Mesh001", StringComparison.OrdinalIgnoreCase));
+            var own = tree.PrefabAssets.FirstOrDefault(a => a.Class == AssetClassID.Mesh
+                && a.Name.Equals("pencil_thrower_mesh", StringComparison.OrdinalIgnoreCase));
+            if (numbered is null || own is null)
+                return "the weapon no longer carries its own mesh beside numbered arms";
+            if (MeshOf(model, tree, own) is not { } alone) return "the weapon's own mesh will not read";
+
+            var row = Rows(detail.Roots).FirstOrDefault(n =>
+                n.Class == AssetClassID.Mesh && n.PathId == own.PathId);
+            if (row is null) return "the weapon lists no row for its own mesh";
+
+            detail.SelectedNode = row;
+            if (!Arrived(model, row)) return $"'{row.Label}' never reached the preview";
+            if (model.Preview.Rest is not { } hidden) return $"'{row.Label}' showed no model";
+
+            Console.WriteLine($"numbered the weapon is drawn with {hidden.VertexCount} vertices "
+                + $"against {alone.VertexCount} of its own, arms off");
+            if (hidden.VertexCount != alone.VertexCount)
+                return $"the arms are off and the weapon is drawn with {hidden.VertexCount} vertices "
+                    + $"against {alone.VertexCount} of its own: '{numbered.Name}' is not being read "
+                    + "as the arms";
+
+            model.ShowArms = true;
+            if (!WaitWhile(() => ReferenceEquals(model.Preview.Rest, hidden), 60_000))
+                return "turning the arms on never showed anything different";
+
+            return model.Preview.Rest is { } shown && shown.VertexCount > hidden.VertexCount
+                ? null
+                : "the arms are on and the weapon is drawn no larger than on its own";
+        }
+        finally
+        {
+            model.ShowArms = was;
+            if (model.Kind != kind)
+            {
+                model.Kind = kind;
+                WaitWhile(() => model.Weapons.Count == 0, 60_000);
+            }
+        }
+    }
+
+    /// What is drawn wears one texture per submesh, in the order the submeshes are in.
+    ///
+    /// The renderer takes a texture per submesh of the model it is given, and the model is the
+    /// item's parts joined submesh by submesh. A renderer in the game can name more materials than
+    /// the mesh it draws has submeshes — `avatar_earth` names two over a one-submesh pair of arms —
+    /// and one texture too many puts every part after it in the wrong paint.
+    private static string? EverySubMeshShownWearsItsOwnTexture(MainViewModel model)
+    {
+        var kind = model.Kind;
+
+        try
+        {
+            if (!Select(model, Core.Catalog.ItemKinds.Avatar, "avatar_earth"))
+                return "'avatar_earth' could not be selected";
+            if (model.Detail is not { Tree: { } tree } detail) return "selecting the avatar left no tree";
+
+            var body = tree.PrefabAssets.FirstOrDefault(a => a.Class == AssetClassID.Mesh
+                && a.Name.Equals("avatar_earth_body_mesh", StringComparison.OrdinalIgnoreCase));
+            if (body is null) return "the avatar no longer carries a body mesh";
+
+            var row = Rows(detail.Roots).FirstOrDefault(n =>
+                n.Class == AssetClassID.Mesh && n.PathId == body.PathId);
+            if (row is null) return "the avatar lists no row for its body";
+
+            detail.SelectedNode = row;
+            if (!Arrived(model, row)) return $"'{row.Label}' never reached the preview";
+            if (model.Preview.Rest is not { } drawn) return $"'{row.Label}' showed no model";
+
+            var worn = model.Preview.MeshTextures?.Count ?? 0;
+            Console.WriteLine($"painted  the avatar is drawn in {drawn.SubMeshes.Count} submeshes "
+                + $"wearing {worn} textures");
+            return worn == drawn.SubMeshes.Count
+                ? null
+                : $"{drawn.SubMeshes.Count} submeshes are shown wearing {worn} textures: the parts "
+                    + "are wearing each other's";
+        }
+        finally
+        {
+            if (model.Kind != kind)
+            {
+                model.Kind = kind;
+                WaitWhile(() => model.Weapons.Count == 0, 60_000);
+            }
         }
     }
 

@@ -1051,13 +1051,16 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
     /// Whether a mesh of the prefab is the player's arms rather than the item.
     ///
-    /// Three names, because the game uses three: `Arms_Mesh` (and `ARMS_Mesh`), which nearly every
-    /// weapon prefab carries; `FPS_PLAYER_Arm_left` and `_Right`, a pair modelled separately; and
-    /// `player001`/`player002`, which is #44 Mauser's name for the same pair. Matched by prefix
-    /// where the game numbers them, and never loosely enough to catch an item called after its own
-    /// arms — an avatar's model can be `avatar_ programmer_arms_mesh`, and that one *is* the item.
+    /// Three names, because the game uses three: `Arms_Mesh` (and `ARMS_Mesh`, and `Arms_Mesh001`
+    /// where the model was exported beside another of the same name), which nearly every weapon
+    /// prefab carries; `FPS_PLAYER_Arm_left` and `_Right`, a pair modelled separately; and
+    /// `player001`/`player002`, which is #44 Mauser's name for the same pair. The number on the end
+    /// is the exporter's and means nothing, so it is taken off before the name is read — but only
+    /// off the end, and never loosely enough to catch an item called after its own arms: an
+    /// avatar's model can be `avatar_ programmer_arms_mesh`, and that one *is* the item.
     private static bool AreArms(string name)
-        => string.Equals(name, Core.Weapons.WeaponResolver.Arms, StringComparison.OrdinalIgnoreCase)
+        => name.AsSpan().TrimEnd("0123456789")
+                .Equals(Core.Weapons.WeaponResolver.Arms, StringComparison.OrdinalIgnoreCase)
             || name.StartsWith("FPS_PLAYER_Arm", StringComparison.OrdinalIgnoreCase)
             || (name.StartsWith("player", StringComparison.OrdinalIgnoreCase)
                 && name.Length > 6 && char.IsDigit(name[^1]));
@@ -1108,8 +1111,16 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     /// answering by mesh alone takes whichever renderer comes first in the file, which is an
     /// accident of file order. Read that way, #1's gun comes back under `Weapon1_info` and its arms
     /// under `Weapon1`: two hierarchies, so the two land a metre apart with nothing saying so.
+    ///
+    /// **And where the item's own root holds no copy of this mesh, the first the shop does not
+    /// own.** `avatar_bronze_hero`'s parts hang under another item's root and come from Places the
+    /// same way: taking them from one arrangement and the model on the row from another puts the
+    /// head beside the body. The walk costs a rig per placement, which is why it is asked only when
+    /// the item's own root has answered nothing.
     private Skeleton? Under(string bundle, long pathId)
         => (PrefabRoot is { } root ? Skeleton.For(_bundles!, bundle, pathId, root, whole: true) : null)
+            ?? Skeleton.Every(_bundles!, bundle, pathId, whole: true)
+                .FirstOrDefault(place => !Outlined(place.Under) && !Copy(place.Root))?.Skeleton
             ?? Skeleton.For(_bundles!, bundle, pathId, whole: true);
 
     private string? PrefabRoot
@@ -1145,6 +1156,79 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         return own.Count > 0
             ? own
             : [.. places.Where(p => !hasOwn || !Somebody(p.Root))];
+    }
+
+    /// Whether a root is the item's own prefab root.
+    private bool Mine(string root)
+        => string.Equals(root, PrefabRoot, StringComparison.OrdinalIgnoreCase);
+
+    /// The sphere the item's own parts fill, in the prefab's space.
+    ///
+    /// The arms are in it, so that turning them off does not move it and change what is drawn
+    /// beside the model.
+    private Reach? Around(
+        IReadOnlyList<(AssetNode Node, UnityMesh Mesh, List<Skeleton.Placement> Places)> found)
+        => Reach.Round(found
+            .SelectMany(part => part.Places
+                .Where(place => Mine(place.Root))
+                .Select(place => place.Skeleton.Placed(part.Mesh, null, 0f))));
+
+    /// The ball an item fills, and whether something drawn in the same space lands on it.
+    private readonly record struct Reach((float X, float Y, float Z) Centre, float Radius)
+    {
+        public static Reach? Round(IEnumerable<UnityMesh> parts)
+        {
+            float minX = float.MaxValue, minY = float.MaxValue, minZ = float.MaxValue;
+            float maxX = float.MinValue, maxY = float.MinValue, maxZ = float.MinValue;
+            var any = false;
+
+            foreach (var part in parts)
+            {
+                if (part.VertexCount == 0) continue;
+
+                var box = MeshBounds.Of(part);
+                minX = Math.Min(minX, box.Centre.X - box.Size.X / 2);
+                maxX = Math.Max(maxX, box.Centre.X + box.Size.X / 2);
+                minY = Math.Min(minY, box.Centre.Y - box.Size.Y / 2);
+                maxY = Math.Max(maxY, box.Centre.Y + box.Size.Y / 2);
+                minZ = Math.Min(minZ, box.Centre.Z - box.Size.Z / 2);
+                maxZ = Math.Max(maxZ, box.Centre.Z + box.Size.Z / 2);
+                any = true;
+            }
+
+            var (x, y, z) = ((maxX - minX) / 2, (maxY - minY) / 2, (maxZ - minZ) / 2);
+            return any
+                ? new Reach((minX + x, minY + y, minZ + z), MathF.Sqrt(x * x + y * y + z * z))
+                : null;
+        }
+
+        public bool Holds(UnityMesh placed)
+        {
+            if (placed.VertexCount == 0) return true;
+
+            var box = MeshBounds.Of(placed);
+            var away = MathF.Sqrt(
+                MathF.Pow(box.Centre.X - Centre.X, 2)
+                + MathF.Pow(box.Centre.Y - Centre.Y, 2)
+                + MathF.Pow(box.Centre.Z - Centre.Z, 2));
+            return away - box.Radius <= Radius;
+        }
+    }
+
+    /// One texture per submesh of the mesh they belong to, however many the renderer named.
+    ///
+    /// A renderer can carry more materials than the mesh it draws has submeshes, and the surplus
+    /// draws nothing: `avatar_earth` has two over a one-submesh pair of arms. The parts of an item
+    /// are joined submesh by submesh and the textures follow that join, so a surplus taken as given
+    /// moves every texture after it onto the wrong part — the avatar's head wears its body.
+    private static IReadOnlyList<PreviewImage?> PerSubMesh(
+        IReadOnlyList<PreviewImage?>? pictures, UnityMesh mesh)
+    {
+        var wanted = Math.Max(mesh.SubMeshes.Count, 1);
+        if (pictures is null) return [.. Enumerable.Repeat((PreviewImage?)null, wanted)];
+        if (pictures.Count == wanted) return pictures;
+
+        return [.. Enumerable.Range(0, wanted).Select(at => at < pictures.Count ? pictures[at] : null)];
     }
 
     /// Whether any of this item's meshes is placed under the item's own prefab root.
@@ -1215,6 +1299,14 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     /// **Only what something places.** A mesh no renderer in this prefab owns a skeleton for has
     /// nowhere to be put, and drawn unposed it sits at the origin.
     ///
+    /// **And only what lands on the item.** A placement under another hierarchy is positioned in
+    /// that hierarchy's space, which says nothing about where this item is: `magicbook_love`'s
+    /// bullet comes out a metre from the book. Framing the pair is what the loss is — the book is
+    /// then a third of the picture, with a speck beside it. Measured over every item: 26 placements
+    /// stand clear of the ball their item fills, and they are projectiles, spare states of a part
+    /// (`small_assistant_rifle` carries an empty, a half and a full battery), effects and `Box001`.
+    /// Judged against the item's own hierarchy, so an item that has none keeps whatever it reaches.
+    ///
     /// `Frames` is what the view is sized by: the item, never the arms. Framing by the pair shrinks
     /// every weapon to make room for a forearm reaching out of the picture.
     private (List<(UnityMesh Mesh, Skeleton Skeleton, bool Frames)> With, List<PreviewImage?> Wearing)
@@ -1230,11 +1322,9 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             .ToList();
         var hasOwn = HasOwnHierarchy(meshes, prefabBundle);
 
+        var found = new List<(AssetNode Node, UnityMesh Mesh, List<Skeleton.Placement> Places)>();
         foreach (var other in meshes)
         {
-            var arms = AreArms(other.Name);
-            if (arms && !ShowArms) continue;
-
             var bundle = other.Bundle.Length > 0 ? other.Bundle : prefabBundle;
             try
             {
@@ -1242,14 +1332,37 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                     is not var (file, info)) continue;
 
                 var field = _bundles!.Context.Deserialize(file, info);
-                if (field is null || UnityMesh.Read(field) is not { VertexCount: > 0 } mesh) continue;
+                // Through AssetPreview, because a part can keep its vertices in the bundle's
+                // companion file as a texture keeps its pixels, and read without one it has no
+                // geometry at all. Three transports' bodies are stored that way.
+                if (field is null || AssetPreview.Mesh(field, _bundles, bundle)
+                    is not { VertexCount: > 0 } mesh) continue;
                 if (!Skeleton.Drawn(_bundles, bundle, other.PathId)) continue;
 
+                found.Add((other, mesh, Places(other, bundle, hasOwn)));
+            }
+            catch (Exception)
+            {
+                // One part that will not read is a part not drawn. The model is still the model.
+            }
+        }
+
+        var reach = hasOwn ? Around(found) : null;
+
+        foreach (var (other, mesh, placed) in found)
+        {
+            var arms = AreArms(other.Name);
+            if (arms && !ShowArms) continue;
+
+            try
+            {
                 // Every place the item puts this mesh, less the first of the mesh on the row: that
                 // one is the model being shown, drawn by the preview itself. A wheel selected out
                 // of the ten a transport places is still the other nine, which is why the row's
                 // mesh is here at all rather than skipped.
-                var places = Places(other, bundle, hasOwn);
+                var places = reach is { } sphere
+                    ? [.. placed.Where(p => Mine(p.Root) || sphere.Holds(p.Skeleton.Placed(mesh, null, 0f)))]
+                    : placed;
                 if (other.PathId == node.PathId) places = [.. places.Skip(1)];
                 if (places.Count == 0) continue;
 
@@ -1262,8 +1375,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                 foreach (var place in places)
                 {
                     with.Add((mesh, place.Skeleton, !arms));
-                    wearing.AddRange(pictures
-                        ?? Enumerable.Repeat((PreviewImage?)null, Math.Max(mesh.SubMeshes.Count, 1)));
+                    wearing.AddRange(PerSubMesh(pictures, mesh));
                 }
             }
             catch (Exception)
@@ -1278,8 +1390,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     /// One texture list for the model and everything drawn with it, in the order the submeshes end
     /// up in. A model with nothing beside it keeps the list it had, null and all.
     private static IReadOnlyList<PreviewImage?>? Alongside(
-        IReadOnlyList<PreviewImage?>? mine, IReadOnlyList<PreviewImage?> theirs)
-        => theirs.Count == 0 ? mine : [.. mine ?? [], .. theirs];
+        IReadOnlyList<PreviewImage?>? mine, UnityMesh model, IReadOnlyList<PreviewImage?> theirs)
+        => theirs.Count == 0 ? mine : [.. PerSubMesh(mine, model), .. theirs];
 
     /// What the game draws the mesh on this row with. Null for a row nothing was found for.
     ///
@@ -1753,7 +1865,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                         // The parts drawn with it follow this mesh's submeshes, so their textures
                         // follow its textures: the renderer takes one per submesh, in order.
                         Preview.Show(mesh, $"{node.Label}   @ {node.Bundle}",
-                            Alongside(TexturesFor(SlotsFor(node)), alongside),
+                            Alongside(TexturesFor(SlotsFor(node)), mesh, alongside),
                             // The model it was reached through is part of which model this is: two
                             // rows can stand for the same asset, and an angle turned to on one of
                             // them is not the angle the other was left at.
