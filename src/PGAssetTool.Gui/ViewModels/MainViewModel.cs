@@ -348,11 +348,18 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                 // a pack around somebody else's installed work without either of them seeing it.
                 // It also stops a protected pack being lifted straight back out of the game it went
                 // into, which is the weaker reason. Mods are checked in the game.
-                _bundles = new BundleSet(game, originals: new ModStore(game).OriginalOf)
+                var store = new ModStore(game);
+                _bundles = new BundleSet(game, originals: store.OriginalOf)
                 {
                     UnpackBudget = ReadMemory * 1024L * 1024,
                 };
-                _catalogs = GameCatalogs.Load(_bundles, string.IsNullOrEmpty(Language) ? _settings.Language : Language);
+
+                // The name tables are kept in this installation's own folder, beside its backups
+                // and its ledger: they are read from this game's bundles and are worth nothing
+                // against another. See WeaponNames.
+                _catalogs = GameCatalogs.Load(
+                    _bundles, string.IsNullOrEmpty(Language) ? _settings.Language : Language,
+                    remember: store.Root);
                 _resolver = new WeaponResolver(_bundles, _catalogs);
             });
 

@@ -988,6 +988,7 @@ internal static class SelfTest
             if (AWeaponIsShownInTheArmsThatHoldIt(model) is { } armsProblem) return Fail(armsProblem);
             if (AnItemIsPreviewedWhole(model) is { } wholeProblem) return Fail(wholeProblem);
             if (PartsAreDrawnWhereTheGamePutsThem(model) is { } placedProblem) return Fail(placedProblem);
+            if (TheNameTablesAreKept(model) is { } namesProblem) return Fail(namesProblem);
             if (TheRowIsPosedWhereItsPartsAre(model) is { } posedProblem) return Fail(posedProblem);
             if (APartIsDrawnOnlyWhereTheItemIs(model) is { } apartProblem) return Fail(apartProblem);
             if (TheArmsAnswerToTheSettingHoweverTheyAreNumbered(model) is { } numberedArms)
@@ -2876,6 +2877,62 @@ internal static class SelfTest
         catch (Exception)
         {
             return null;
+        }
+    }
+
+    /// The name tables answer the same whether they were read from the game or from the copy kept
+    /// beside its backups.
+    ///
+    /// Eleven tables and sixteen thousand strings are a third of the wait before a window has a
+    /// list, and they change only when the game does — so they are kept, under a key made of the
+    /// language bundles' own hashes. What that key has to be worth is this: the same names, and a
+    /// table built against anything else ignored rather than believed.
+    private static string? TheNameTablesAreKept(MainViewModel model)
+    {
+        if (model.Reader is not { } bundles) return "there is no reader to ask";
+
+        var scratch = Path.Combine(Path.GetTempPath(), "pgassettool-selftest-names");
+        try
+        {
+            if (Directory.Exists(scratch)) Directory.Delete(scratch, recursive: true);
+
+            var items = Core.Catalog.ItemCatalog.Load(bundles);
+
+            var clock = System.Diagnostics.Stopwatch.StartNew();
+            var read = Core.Catalog.WeaponNames.Load(bundles, items, scratch);
+            var reading = clock.ElapsedMilliseconds;
+
+            clock.Restart();
+            var kept = Core.Catalog.WeaponNames.Load(bundles, items, scratch);
+            var keeping = clock.ElapsedMilliseconds;
+
+            Console.WriteLine($"names    {read.Count} in {reading}ms from the game, "
+                + $"{kept.Count} in {keeping}ms from the copy");
+            if (kept.Count != read.Count)
+                return $"the game's tables hold {read.Count} names and the kept copy {kept.Count}";
+
+            var weapon = items.Weapons.FirstOrDefault(w => read.For(w).Count > 1);
+            if (weapon is null) return "no weapon carries more than one name to compare";
+            if (!read.For(weapon).SequenceEqual(kept.For(weapon), StringComparer.Ordinal))
+                return $"'{weapon.Slug}' is {string.Join("/", read.For(weapon))} from the game "
+                    + $"and {string.Join("/", kept.For(weapon))} from the kept copy";
+
+            // Built against something else: the key says so, and what it names is read again.
+            var path = Path.Combine(scratch, "names.json");
+            File.WriteAllText(path, File.ReadAllText(path).Replace("weapons=", "weapons=9"));
+            if (Core.Catalog.WeaponNames.Load(bundles, items, scratch).Count != read.Count)
+                return "a table kept against another game was taken as this one's";
+
+            return null;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            return $"the kept tables could not be written: {e.Message}";
+        }
+        finally
+        {
+            try { if (Directory.Exists(scratch)) Directory.Delete(scratch, recursive: true); }
+            catch (Exception) { }
         }
     }
 

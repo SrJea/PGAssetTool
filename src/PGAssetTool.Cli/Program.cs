@@ -847,7 +847,10 @@ static GameCatalogs LoadCatalogs(BundleSet bundles, string? language)
         throw new CommandLineException($"There is no language bundle called '{language}'. The game has: "
             + string.Join(", ", GameCatalogs.Languages(bundles).Select(l => $"{l.Bundle} ({l.Name})")) + ".");
 
-    return GameCatalogs.Load(bundles, language ?? GameCatalogs.DefaultLanguage);
+    // Kept in this installation's own folder, the same one the window uses: a run of either reads
+    // what the other left. See WeaponNames.
+    return GameCatalogs.Load(
+        bundles, language ?? GameCatalogs.DefaultLanguage, remember: new ModStore(bundles.Game).Root);
 }
 
 /// A kind by the name a person would type it: `hat`, `Hat`, `hats`.
